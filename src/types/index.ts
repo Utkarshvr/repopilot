@@ -18,13 +18,12 @@ export type Language =
   | "JavaScript"
   | "TSX"
   | "CSS"
-  | "JSON";
+  | "JSON"
+  | "Unknown";
 
 export type RepositoryStatus = "indexed" | "indexing" | "pending" | "error";
 
 export type DataProvenance = "mock" | "simulated" | "analyzed";
-
-export type ImpactSeverity = "low" | "medium" | "high" | "critical";
 
 export interface SourceFile {
   id: string;
@@ -36,6 +35,8 @@ export interface SourceFile {
   dependencyCount: number;
   /** Number of incoming import edges (dependents). */
   dependentCount: number;
+  extension?: string;
+  size?: number;
   linesOfCode?: number;
 }
 
@@ -44,6 +45,11 @@ export interface DependencyEdge {
   id: string;
   source: string;
   target: string;
+  specifier?: string;
+  importedSymbols?: string[];
+  importKind?: string;
+  line?: number;
+  column?: number;
 }
 
 export interface DependencyGraphData {
@@ -66,6 +72,7 @@ export interface Repository {
   fileCount: number;
   dependencyCount: number;
   stars: number;
+  forks?: number;
   updatedAt: string;
   status: RepositoryStatus;
   branch: string;
@@ -92,7 +99,8 @@ export interface AffectedFile {
   reason: string;
   /** Hop path from the changed file to this file (ids). */
   pathFromSource: string[];
-  severity: ImpactSeverity;
+  /** Display-ready dependency chain, from this importer toward the changed file. */
+  dependencyPath: string[];
 }
 
 export interface ChangeImpactResult {
@@ -104,19 +112,21 @@ export interface ChangeImpactResult {
   maxDepth: number;
   /** All potentially affected modules (direct + transitive). */
   affectedModules: AffectedFile[];
-  overallSeverity: ImpactSeverity;
+  totalAffected: number;
   provenance: DataProvenance;
   note: string;
 }
 
 export interface GraphSelectionHighlight {
   selectedId: string | null;
-  /** Selected node + direct dependencies + direct dependents. */
+  /** Selected node plus nodes in the chosen dependency neighborhood. */
   highlightedNodeIds: Set<string>;
-  /** Edges that participate in the direct relationship. */
+  /** Edges that participate in the chosen dependency neighborhood. */
   highlightedEdgeIds: Set<string>;
   dependencyIds: Set<string>;
   dependentIds: Set<string>;
+  transitiveDependencyIds: Set<string>;
+  transitiveDependentIds: Set<string>;
 }
 
 export interface NavItem {

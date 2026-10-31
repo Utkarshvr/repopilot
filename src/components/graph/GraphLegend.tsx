@@ -3,6 +3,8 @@ export default function GraphLegend() {
     { color: "bg-indigo-400", label: "Selected" },
     { color: "bg-sky-400", label: "Dependency (imports)" },
     { color: "bg-amber-400", label: "Dependent (imported by)" },
+    { color: "bg-cyan-700", label: "Transitive dependency" },
+    { color: "bg-orange-700", label: "Transitive dependent" },
     { color: "bg-zinc-600", label: "Unrelated (dimmed)" },
   ];
 

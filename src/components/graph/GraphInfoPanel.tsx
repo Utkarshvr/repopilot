@@ -1,19 +1,27 @@
 import { Link } from "react-router-dom";
 import { ArrowUpRight, X } from "lucide-react";
 import type { SourceFile } from "@/types";
-import type { GraphSelectionHighlight } from "@/types";
+import type { DataProvenance, GraphSelectionHighlight } from "@/types";
 import { MockBadge } from "@/components/shared/MockBadge";
 
 export default function GraphInfoPanel({
   file,
   highlight,
   filesById,
+  transitiveDependencyCount,
+  transitiveDependentCount,
+  circularGroup,
   onClose,
+  provenance = "mock",
 }: {
   file: SourceFile;
   highlight: GraphSelectionHighlight;
   filesById: Map<string, SourceFile>;
+  transitiveDependencyCount: number;
+  transitiveDependentCount: number;
+  circularGroup: string[] | null;
   onClose: () => void;
+  provenance?: DataProvenance;
 }) {
   const deps = [...highlight.dependencyIds]
     .map((id) => filesById.get(id))
@@ -30,7 +38,7 @@ export default function GraphInfoPanel({
             <p className="text-[10px] font-medium tracking-wide text-zinc-500 uppercase">
               Selected file
             </p>
-            <MockBadge provenance="mock" />
+            <MockBadge provenance={provenance} />
           </div>
           <h3 className="mt-1 truncate text-sm font-semibold text-zinc-100">
             {file.name}
@@ -53,18 +61,32 @@ export default function GraphInfoPanel({
         <dl className="grid grid-cols-2 gap-2 text-xs">
           <InfoCell label="Kind" value={file.kind} />
           <InfoCell label="Language" value={file.language} />
+          {file.extension ? <InfoCell label="Extension" value={file.extension} /> : null}
+          {file.size != null ? <InfoCell label="Size" value={`${(file.size / 1024).toFixed(1)} KB`} /> : null}
           <InfoCell label="Dependencies" value={String(file.dependencyCount)} />
           <InfoCell label="Dependents" value={String(file.dependentCount)} />
+          <InfoCell label="Transitive dependencies" value={String(transitiveDependencyCount)} />
+          <InfoCell label="Transitive dependents" value={String(transitiveDependentCount)} />
+          <InfoCell label="Circular dependency" value={circularGroup ? "Yes" : "No"} />
           {file.linesOfCode != null ? (
             <InfoCell label="LOC (approx)" value={String(file.linesOfCode)} />
           ) : null}
         </dl>
 
+        {circularGroup && (
+          <div className="rounded-md border border-rose-500/20 bg-rose-500/[0.04] p-2.5">
+            <p className="text-[10px] font-medium text-rose-300">Strongly connected group</p>
+            <ul className="mt-1 space-y-0.5">
+              {circularGroup.map((id) => <li key={id} className="break-all font-mono text-[10px] text-zinc-400">{filesById.get(id)?.path ?? id}</li>)}
+            </ul>
+          </div>
+        )}
+
         <RelationList
           title="Direct dependencies"
           hint="Files this module imports"
           files={deps}
-          empty="No outgoing imports in the mock graph."
+          empty="No outgoing imports found."
           tone="sky"
         />
 
@@ -72,7 +94,7 @@ export default function GraphInfoPanel({
           title="Direct dependents"
           hint="Files that import this module"
           files={dependents}
-          empty="Nothing imports this file in the mock graph."
+          empty="Nothing imports this file."
           tone="amber"
         />
 

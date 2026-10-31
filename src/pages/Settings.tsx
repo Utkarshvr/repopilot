@@ -1,5 +1,4 @@
 import { Bell, GitBranch, Moon, Shield } from "lucide-react";
-import { MockBadge } from "@/components/shared/MockBadge";
 
 const sections = [
   {
@@ -14,21 +13,21 @@ const sections = [
   },
   {
     title: "Integrations",
-    description: "External connections will land in Phase II.",
+    description: "Public GitHub repository analysis is available from Repositories.",
     icon: GitBranch,
     rows: [
-      { label: "GitHub OAuth", value: "Not connected · Phase II" },
-      { label: "Webhook sync", value: "Disabled · Phase II" },
-      { label: "Private repos", value: "Requires auth · Phase II" },
+      { label: "Public repositories", value: "Supported" },
+      { label: "Webhook sync", value: "Not configured" },
+      { label: "Private repos", value: "Requires authentication" },
     ],
   },
   {
     title: "Analysis",
-    description: "Real AST and risk scoring arrive with Milestone 3.",
+    description: "Repository dependencies are extracted from JavaScript and TypeScript source.",
     icon: Shield,
     rows: [
-      { label: "Dependency source", value: "Mock graph (Phase I)" },
-      { label: "Impact model", value: "Simulated traversal" },
+      { label: "Dependency source", value: "GitHub source analysis" },
+      { label: "Impact model", value: "Reverse dependency traversal" },
       { label: "AI explanations", value: "Not enabled · Phase II" },
     ],
   },
@@ -37,8 +36,8 @@ const sections = [
     description: "Local UI placeholders only.",
     icon: Bell,
     rows: [
-      { label: "Impact alerts", value: "On (mock)" },
-      { label: "Graph updates", value: "On (mock)" },
+      { label: "Impact alerts", value: "Not configured" },
+      { label: "Graph updates", value: "Manual re-analysis" },
       { label: "Email digest", value: "Off" },
     ],
   },
@@ -50,7 +49,6 @@ export default function Settings() {
       <section>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-          <MockBadge provenance="mock" />
         </div>
         <p className="mt-2 text-sm text-zinc-500">
           Workspace preferences for RepoPilot. Values below are UI scaffolding —

@@ -2,7 +2,7 @@ import { ArrowUpRight, Clock3, GitBranch } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { Repository } from "@/types";
 import { MockBadge } from "@/components/shared/MockBadge";
-import { useAppStore } from "@/store/useAppStore";
+import { useRepositoryStore } from "@/store/repositoryStore";
 import { cn } from "@/lib/utils";
 
 const languageDot: Record<string, string> = {
@@ -28,8 +28,8 @@ export function RecentRepositories({
 }: {
   repositories: Repository[];
 }) {
-  const setSelectedRepositoryId = useAppStore((s) => s.setSelectedRepositoryId);
-  const selectedRepositoryId = useAppStore((s) => s.selectedRepositoryId);
+  const setActiveRepository = useRepositoryStore((s) => s.setActiveRepository);
+  const activeRepositoryId = useRepositoryStore((s) => s.activeRepositoryId);
 
   return (
     <section className="rounded-xl border border-white/[0.07] bg-[#101014]">
@@ -37,10 +37,10 @@ export function RecentRepositories({
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">Recent Repositories</h3>
-            <MockBadge provenance="mock" />
+            <MockBadge provenance={repositories[0]?.provenance ?? "analyzed"} />
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Recently indexed codebases (mock catalog)
+            Recently analyzed codebases
           </p>
         </div>
         <Link
@@ -56,10 +56,10 @@ export function RecentRepositories({
           <li key={repo.id}>
             <button
               type="button"
-              onClick={() => setSelectedRepositoryId(repo.id)}
+              onClick={() => setActiveRepository(repo.id)}
               className={cn(
                 "flex w-full items-center justify-between border-b border-white/[0.05] px-5 py-4 text-left transition last:border-0 hover:bg-white/[0.02]",
-                selectedRepositoryId === repo.id && "bg-indigo-500/[0.04]",
+                activeRepositoryId === repo.id && "bg-indigo-500/[0.04]",
               )}
             >
               <div className="flex items-center gap-3.5">

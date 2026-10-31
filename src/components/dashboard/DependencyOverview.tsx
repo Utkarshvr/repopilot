@@ -1,10 +1,11 @@
 import { ArrowUpRight, Workflow } from "lucide-react";
 import { Link } from "react-router-dom";
 import { MockBadge } from "@/components/shared/MockBadge";
-import { repoPilotGraph } from "@/data/mockDependencyGraph";
+import { useRepositoryStore } from "@/store/repositoryStore";
 
 export function DependencyOverview() {
-  const { files, edges, provenance, note } = repoPilotGraph;
+  const graph = useRepositoryStore((s) => s.getActiveGraph());
+  const { files, edges, provenance, note } = graph;
 
   const byKind = files.reduce<Record<string, number>>((acc, file) => {
     acc[file.kind] = (acc[file.kind] ?? 0) + 1;
@@ -20,7 +21,7 @@ export function DependencyOverview() {
             <MockBadge provenance={provenance} />
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            RepoPilot frontend · {files.length} files · {edges.length} edges
+            {files.length} files · {edges.length} edges
           </p>
         </div>
         <Workflow size={18} className="shrink-0 text-indigo-400" />

@@ -1,5 +1,4 @@
 import type { AffectedFile } from "@/types";
-import { ImpactSeverityBadge } from "./ImpactSeverityBadge";
 import { cn } from "@/lib/utils";
 
 export function ImpactFileList({
@@ -33,7 +32,7 @@ export function ImpactFileList({
 
       {files.length === 0 ? (
         <p className="px-4 py-8 text-center text-xs text-zinc-600">
-          No {variant} dependents in the mock graph.
+          No {variant} dependents found.
         </p>
       ) : (
         <ul className="divide-y divide-white/[0.05]">
@@ -52,11 +51,11 @@ export function ImpactFileList({
                   <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-zinc-500">
                     depth {file.depth}
                   </span>
-                  <ImpactSeverityBadge severity={file.severity} />
                 </div>
               </div>
-              <p className="mt-2 text-[11px] leading-5 text-zinc-500">
-                {file.reason}
+              <p className="mt-2 text-[11px] leading-5 text-zinc-500">{file.reason}</p>
+              <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">
+                Path: {file.dependencyPath.join(" → ")}
               </p>
             </li>
           ))}

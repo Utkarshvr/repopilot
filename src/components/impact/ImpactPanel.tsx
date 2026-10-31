@@ -1,5 +1,4 @@
 import type { ChangeImpactResult } from "@/types";
-import { ImpactSeverityBadge } from "./ImpactSeverityBadge";
 import { ImpactFileList } from "./ImpactFileList";
 import { MockBadge } from "@/components/shared/MockBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -11,7 +10,7 @@ export function ImpactPanel({ impact }: { impact: ChangeImpactResult | null }) {
       <EmptyState
         icon={ShieldAlert}
         title="Select a file to analyze"
-        description="Choose a source file to simulate direct and transitive change impact using the mock dependency graph."
+        description="Choose a source file to calculate direct and transitive dependents from the active repository graph."
         className="min-h-[420px]"
       />
     );
@@ -35,7 +34,6 @@ export function ImpactPanel({ impact }: { impact: ChangeImpactResult | null }) {
               {impact.selectedFile.path}
             </p>
           </div>
-          <ImpactSeverityBadge severity={impact.overallSeverity} />
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -49,8 +47,7 @@ export function ImpactPanel({ impact }: { impact: ChangeImpactResult | null }) {
         </div>
 
         <p className="mt-4 rounded-lg border border-violet-500/20 bg-violet-500/[0.06] px-3 py-2 text-[11px] leading-5 text-violet-200/80">
-          {impact.note} Severity labels are heuristic (depth + fan-out), not
-          measured risk from code analysis.
+          {impact.note}
         </p>
       </section>
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -21,7 +21,7 @@ import GraphControls from "./GraphControls";
 import GraphLegend from "./GraphLegend";
 import GraphInfoPanel from "./GraphInfoPanel";
 import { MockBadge } from "@/components/shared/MockBadge";
-import { repoPilotGraph } from "@/data/mockDependencyGraph";
+
 import {
   buildGraphIndex,
   computeSelectionHighlight,
@@ -60,15 +60,24 @@ function buildInitialEdges(graph: DependencyGraphData): Edge[] {
 function applyHighlightToNodes(
   nodes: FileFlowNode[],
   highlight: GraphSelectionHighlight,
+  highlightMode: "dependencies" | "dependents" | "neighborhood",
+  directImpactIds?: Set<string>,
+  transitiveImpactIds?: Set<string>,
 ): FileFlowNode[] {
   return nodes.map((node) => {
     let highlightRole: FileNodeData["highlightRole"] = "idle";
     if (highlight.selectedId) {
       if (node.id === highlight.selectedId) highlightRole = "selected";
-      else if (highlight.dependencyIds.has(node.id))
+      else if (directImpactIds?.has(node.id)) highlightRole = "directImpact";
+      else if (transitiveImpactIds?.has(node.id)) highlightRole = "transitiveImpact";
+      else if (highlight.dependencyIds.has(node.id) && highlightMode !== "dependents")
         highlightRole = "dependency";
-      else if (highlight.dependentIds.has(node.id))
+      else if (highlight.dependentIds.has(node.id) && highlightMode !== "dependencies")
         highlightRole = "dependent";
+      else if (highlight.transitiveDependencyIds.has(node.id) && highlightMode !== "dependents")
+        highlightRole = "transitiveDependency";
+      else if (highlight.transitiveDependentIds.has(node.id) && highlightMode !== "dependencies")
+        highlightRole = "transitiveDependent";
       else highlightRole = "dimmed";
     }
 
@@ -83,17 +92,21 @@ function applyHighlightToNodes(
 function applyHighlightToEdges(
   edges: Edge[],
   highlight: GraphSelectionHighlight,
+  impactIds?: Set<string>,
 ): Edge[] {
   return edges.map((edge) => {
     const active =
-      !highlight.selectedId || highlight.highlightedEdgeIds.has(edge.id);
+      (!highlight.selectedId || highlight.highlightedEdgeIds.has(edge.id)) ||
+      Boolean(impactIds?.has(edge.source) && impactIds.has(edge.target));
 
     return {
       ...edge,
       animated: Boolean(highlight.selectedId && active),
       style: {
-        stroke: active && highlight.selectedId ? "#818cf8" : "#3f3f46",
-        strokeWidth: active && highlight.selectedId ? 2 : 1,
+        stroke: impactIds?.has(edge.source) && impactIds.has(edge.target)
+          ? "#f59e0b"
+          : active && highlight.selectedId ? "#818cf8" : "#3f3f46",
+        strokeWidth: active ? 2 : 1,
         opacity: !highlight.selectedId ? 0.55 : active ? 1 : 0.12,
       },
     };
@@ -104,19 +117,23 @@ function DependencyGraphCanvas({
   graph,
   heightClass = "h-[560px]",
   showInfoPanel = true,
+  highlightedImpact,
 }: {
   graph: DependencyGraphData;
   heightClass?: string;
   showInfoPanel?: boolean;
+  highlightedImpact?: { direct: Set<string>; transitive: Set<string> };
 }) {
   const selectedFileId = useAppStore((s) => s.selectedFileId);
   const setSelectedFileId = useAppStore((s) => s.setSelectedFileId);
   const clearSelection = useAppStore((s) => s.clearSelection);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [highlightMode, setHighlightMode] = useState<"dependencies" | "dependents" | "neighborhood">("neighborhood");
 
   const index = useMemo(() => buildGraphIndex(graph), [graph]);
   const highlight = useMemo(
-    () => computeSelectionHighlight(index, selectedFileId),
-    [index, selectedFileId],
+    () => computeSelectionHighlight(index, selectedFileId, highlightMode),
+    [index, selectedFileId, highlightMode],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FileFlowNode>(
@@ -127,9 +144,17 @@ function DependencyGraphCanvas({
   );
 
   useEffect(() => {
-    setNodes((current) => applyHighlightToNodes(current, highlight));
-    setEdges((current) => applyHighlightToEdges(current, highlight));
-  }, [highlight, setNodes, setEdges]);
+    setNodes(buildInitialNodes(graph));
+    setEdges(buildInitialEdges(graph));
+  }, [graph, setNodes, setEdges]);
+
+  useEffect(() => {
+    setNodes((current) => applyHighlightToNodes(current, highlight, highlightMode, highlightedImpact?.direct, highlightedImpact?.transitive));
+    const impactIds = highlightedImpact
+      ? new Set([highlight.selectedId, ...highlightedImpact.direct, ...highlightedImpact.transitive].filter((id): id is string => Boolean(id)))
+      : undefined;
+    setEdges((current) => applyHighlightToEdges(current, highlight, impactIds));
+  }, [highlight, highlightMode, highlightedImpact, setNodes, setEdges]);
 
   const handleNodeClick: NodeMouseHandler<FileFlowNode> = useCallback(
     (_, node) => {
@@ -142,6 +167,16 @@ function DependencyGraphCanvas({
     ? index.filesById.get(selectedFileId)
     : undefined;
 
+  const selectSearchMatch = useCallback((event: React.FormEvent) => {
+    event.preventDefault();
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return;
+    const match = graph.files.find((file) =>
+      `${file.name} ${file.path}`.toLowerCase().includes(query),
+    );
+    if (match) setSelectedFileId(match.id);
+  }, [graph.files, searchQuery, setSelectedFileId]);
+
   return (
     <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#101014]">
       <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5">
@@ -153,13 +188,35 @@ function DependencyGraphCanvas({
           <p className="mt-1 text-xs text-zinc-500">{graph.note}</p>
         </div>
 
-        <button
-          type="button"
-          onClick={clearSelection}
-          className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-zinc-400 transition hover:text-white"
-        >
-          Clear selection
-        </button>
+        <div className="flex items-center gap-2">
+          <form onSubmit={selectSearchMatch} className="flex items-center gap-1.5">
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search file or path…"
+              aria-label="Search graph files by name or path"
+              className="w-44 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-indigo-500/40"
+            />
+            <button type="submit" className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-white">Find</button>
+          </form>
+          <button
+            type="button"
+            onClick={clearSelection}
+            className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-zinc-400 transition hover:text-white"
+          >
+            Clear selection
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] px-5 py-2">
+        <span className="text-[10px] text-zinc-500">Highlight</span>
+        {(["dependencies", "dependents", "neighborhood"] as const).map((mode) => (
+          <button key={mode} type="button" onClick={() => setHighlightMode(mode)}
+            className={`rounded border px-2 py-1 text-[10px] transition ${highlightMode === mode ? "border-indigo-400/40 bg-indigo-500/10 text-indigo-300" : "border-white/10 text-zinc-500 hover:text-zinc-200"}`}>
+            {mode === "dependencies" ? "Dependencies" : mode === "dependents" ? "Dependents" : "Full neighborhood"}
+          </button>
+        ))}
       </div>
 
       <div className={`flex flex-col lg:flex-row ${heightClass}`}>
@@ -198,6 +255,8 @@ function DependencyGraphCanvas({
                 if (role === "selected") return "#818cf8";
                 if (role === "dependency") return "#38bdf8";
                 if (role === "dependent") return "#fbbf24";
+                if (role === "transitiveDependency") return "#0e7490";
+                if (role === "transitiveDependent") return "#b45309";
                 return "#3f3f46";
               }}
               maskColor="rgba(0,0,0,0.7)"
@@ -213,7 +272,11 @@ function DependencyGraphCanvas({
             file={selectedFile}
             highlight={highlight}
             filesById={index.filesById}
+            transitiveDependencyCount={highlight.transitiveDependencyIds.size}
+            transitiveDependentCount={highlight.transitiveDependentIds.size}
+            circularGroup={index.circularGroupByFile.get(selectedFile.id) ?? null}
             onClose={clearSelection}
+            provenance={graph.provenance}
           />
         ) : null}
       </div>
@@ -237,13 +300,15 @@ function DependencyGraphCanvas({
 }
 
 export default function DependencyGraph({
-  graph = repoPilotGraph,
+  graph,
   heightClass,
   showInfoPanel = true,
+  highlightedImpact,
 }: {
-  graph?: DependencyGraphData;
+  graph: DependencyGraphData;
   heightClass?: string;
   showInfoPanel?: boolean;
+  highlightedImpact?: { direct: Set<string>; transitive: Set<string> };
 }) {
   return (
     <ReactFlowProvider>
@@ -251,6 +316,7 @@ export default function DependencyGraph({
         graph={graph}
         heightClass={heightClass}
         showInfoPanel={showInfoPanel}
+        highlightedImpact={highlightedImpact}
       />
     </ReactFlowProvider>
   );

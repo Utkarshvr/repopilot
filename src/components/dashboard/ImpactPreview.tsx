@@ -2,13 +2,16 @@ import { ArrowUpRight, ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 import { MockBadge } from "@/components/shared/MockBadge";
 import { useAppStore } from "@/store/useAppStore";
-import { repoPilotGraph } from "@/data/mockDependencyGraph";
+import { useRepositoryStore } from "@/store/repositoryStore";
 import { computeChangeImpact } from "@/lib/graph";
 
 export function ImpactPreview() {
   const selectedFileId = useAppStore((s) => s.selectedFileId);
+  const graph = useRepositoryStore((s) => s.getActiveGraph());
+  const isReal = graph.provenance === "analyzed";
+
   const impact = selectedFileId
-    ? computeChangeImpact(repoPilotGraph, selectedFileId)
+    ? computeChangeImpact(graph, selectedFileId)
     : null;
 
   return (
@@ -17,10 +20,12 @@ export function ImpactPreview() {
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">Change Impact Intelligence</h3>
-            <MockBadge provenance="simulated" />
+            <MockBadge provenance={isReal ? "analyzed" : "simulated"} />
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Preview what breaks when a file changes — using the mock graph.
+            {isReal
+              ? "Preview which files depend on a changed file in the analyzed graph."
+              : "Connect a repository to preview files affected by a change."}
           </p>
         </div>
         <ShieldAlert size={18} className="shrink-0 text-indigo-400" />
@@ -58,7 +63,7 @@ export function ImpactPreview() {
         <div className="mt-5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
           <p className="text-sm text-zinc-300">No file selected</p>
           <p className="mt-1 text-xs text-zinc-500">
-            Pick a node in the dependency graph to simulate impact.
+            Pick a node in the dependency graph to calculate change impact.
           </p>
           <Link
             to="/graph"

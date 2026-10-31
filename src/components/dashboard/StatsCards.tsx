@@ -7,7 +7,7 @@ const cards = [
     key: "repositories" as const,
     label: "Repositories",
     icon: GitBranch,
-    hint: "Connected (mock)",
+    hint: "Analyzed repositories",
   },
   {
     key: "filesIndexed" as const,
@@ -23,9 +23,9 @@ const cards = [
   },
   {
     key: "potentialRisks" as const,
-    label: "Potential Risks",
+    label: "Unresolved Imports",
     icon: ShieldAlert,
-    hint: "Simulated signals",
+    hint: "Imports needing review",
   },
 ];
 
