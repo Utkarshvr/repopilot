@@ -15,6 +15,10 @@ const titles: Record<string, { crumb: string; title: string }> = {
     crumb: "Workspace / Impact Analysis",
     title: "Change Impact Intelligence",
   },
+  "/changes": {
+    crumb: "Workspace / Change Analysis",
+    title: "Change Analysis",
+  },
   "/settings": { crumb: "Workspace / Settings", title: "Settings" },
 };
 

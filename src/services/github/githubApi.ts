@@ -3,6 +3,8 @@ import type {
   ParsedGitHubUrl,
   RepoTreeEntry,
 } from "@/types/analysis";
+import type { GitHubCompareResult, GitHubComparedFile } from "@/types/changes";
+import { validateGitHubRevision } from "@/lib/changes";
 
 const GITHUB_API = "https://api.github.com";
 const RAW_HOST = "https://raw.githubusercontent.com";
@@ -165,6 +167,87 @@ export async function fetchRepositoryMetadata(
     private: data.private,
     visibility: data.visibility,
     htmlUrl: data.html_url,
+  };
+}
+
+interface GhCompareResponse {
+  base_commit?: { sha?: string; commit?: { tree?: { sha?: string } } };
+  head_commit?: { sha?: string; commit?: { tree?: { sha?: string } } };
+  total_commits?: number;
+  files?: Array<{
+    filename?: string;
+    previous_filename?: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+    changes?: number;
+    patch?: string;
+  }>;
+}
+
+function encodeGitRef(ref: string): string {
+  return ref.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+/**
+ * Compare two refs with GitHub's compare endpoint. GitHub includes changed
+ * files on the first page only (up to 300); page 1 is requested intentionally,
+ * while `per_page=100` controls commit pagination. A full 300-file response is
+ * treated as potentially truncated because the API provides no total file count.
+ */
+export async function compareRepositoryCommits(
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+  signal?: AbortSignal,
+): Promise<GitHubCompareResult> {
+  const baseError = validateGitHubRevision(base);
+  const headError = validateGitHubRevision(head);
+  if (baseError) throw new GitHubApiError(`Invalid base revision: ${baseError}`, 400);
+  if (headError) throw new GitHubApiError(`Invalid head revision: ${headError}`, 400);
+  if (base.trim() === head.trim()) throw new GitHubApiError("Base and head revisions must be different.", 400);
+
+  const route = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${encodeGitRef(base.trim())}...${encodeGitRef(head.trim())}?per_page=100&page=1`;
+  let data: GhCompareResponse;
+  try {
+    data = await githubFetch<GhCompareResponse>(route, signal);
+  } catch (error) {
+    if (error instanceof GitHubApiError && error.status === 404) {
+      throw new GitHubApiError("GitHub could not find the repository or one of these revisions. Check both refs and public repository visibility.", 404);
+    }
+    throw error;
+  }
+
+  if (!Array.isArray(data.files)) {
+    throw new GitHubApiError("GitHub did not return a changed-file list, so comparison completeness cannot be verified.", 502);
+  }
+  const files: GitHubComparedFile[] = data.files.map((file) => {
+    if (typeof file.filename !== "string" || typeof file.status !== "string") {
+      throw new GitHubApiError("GitHub returned an invalid changed-file record.", 502);
+    }
+    return {
+      filename: file.filename,
+      previous_filename: file.previous_filename,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      changes: file.changes,
+      patch: file.patch,
+    };
+  });
+  const limitReached = files.length >= 300;
+  return {
+    baseSha: typeof data.base_commit?.sha === "string" ? data.base_commit.sha : null,
+    headSha: typeof data.head_commit?.sha === "string" ? data.head_commit.sha : null,
+    baseTreeSha: typeof data.base_commit?.commit?.tree?.sha === "string" ? data.base_commit.commit.tree.sha : null,
+    headTreeSha: typeof data.head_commit?.commit?.tree?.sha === "string" ? data.head_commit.commit.tree.sha : null,
+    totalCommits: Number.isFinite(data.total_commits) ? data.total_commits! : null,
+    files,
+    isComplete: !limitReached,
+    completenessWarning: limitReached
+      ? "GitHub returned 300 changed files, its maximum for a compare response. Additional changed files may be omitted."
+      : null,
   };
 }
 

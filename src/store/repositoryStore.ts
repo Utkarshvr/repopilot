@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { AnalyzedRepository, AnalysisProgress } from "@/types/analysis";
+import type { AnalyzedRepository, AnalysisProgress, RepositoryGraphSnapshot } from "@/types/analysis";
 import { emptyProgress } from "@/types/analysis";
 import type { DependencyGraphData } from "@/types";
+import type { ChangeSet } from "@/types/changes";
 
 // ------------------------------------------------------------------
 // Types
@@ -11,6 +12,9 @@ import type { DependencyGraphData } from "@/types";
 export interface RepositoryStoreState {
   /** All analyzed repositories, keyed by id */
   analyzedRepositories: Record<string, AnalyzedRepository>;
+  changeSets: Record<string, ChangeSet>;
+  activeChangeSetId: string | null;
+  revisionSnapshots: Record<string, RepositoryGraphSnapshot[]>;
 
   /** Currently active repository id */
   activeRepositoryId: string | null;
@@ -37,6 +41,11 @@ export interface RepositoryStoreActions {
 
   /** Store a completed analysis result */
   storeAnalysis: (result: AnalyzedRepository) => void;
+  storeChangeSet: (changeSet: ChangeSet) => void;
+  clearActiveChangeSet: () => void;
+  storeRevisionSnapshot: (snapshot: RepositoryGraphSnapshot) => void;
+  getRevisionSnapshot: (repositoryId: string, commitSha: string | null | undefined) => RepositoryGraphSnapshot | null;
+  getRevisionSnapshots: (repositoryId: string) => RepositoryGraphSnapshot[];
 
   /** Mark analysis as failed */
   failAnalysis: (error: string) => void;
@@ -58,6 +67,7 @@ export interface RepositoryStoreActions {
 
   /** Get the active analyzed repository */
   getActiveAnalyzed: () => AnalyzedRepository | null;
+  getActiveChangeSet: () => ChangeSet | null;
 }
 
 export type RepositoryStore = RepositoryStoreState & RepositoryStoreActions;
@@ -69,10 +79,26 @@ export type RepositoryStore = RepositoryStoreState & RepositoryStoreActions;
 const MAX_STORED_REPOS = 5;
 const emptyGraph: DependencyGraphData = { files: [], edges: [], positions: {}, provenance: "simulated", repositoryId: "", generatedAt: new Date(0).toISOString(), note: "Connect a public GitHub repository to build its dependency graph." };
 
+function isValidRevisionSnapshot(value: unknown, repositoryId: string, commitSha: string): value is RepositoryGraphSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<RepositoryGraphSnapshot>;
+  return candidate.repositoryId === repositoryId && candidate.commitSha?.toLowerCase() === commitSha.toLowerCase() && /^[0-9a-f]{40,64}$/i.test(commitSha) &&
+    typeof candidate.id === "string" && candidate.id === `${repositoryId}@${commitSha.toLowerCase()}` &&
+    typeof candidate.owner === "string" && typeof candidate.repo === "string" && typeof candidate.ref === "string" && /^[0-9a-f]{40,64}$/i.test(candidate.treeSha ?? "") &&
+    Array.isArray(candidate.graph?.files) && candidate.graph.files.every((file) => Boolean(file && typeof file.id === "string" && typeof file.path === "string")) &&
+    Array.isArray(candidate.graph?.edges) && candidate.graph.edges.every((edge) => Boolean(edge && typeof edge.source === "string" && typeof edge.target === "string")) &&
+    Array.isArray(candidate.unresolvedImports) && Array.isArray(candidate.fileOutcomes) &&
+    candidate.graph.revision?.commitSha?.toLowerCase() === commitSha.toLowerCase() && candidate.graph.revision.treeSha === candidate.treeSha &&
+    Boolean(candidate.stats && Number.isFinite(candidate.stats.filesAnalyzed) && Number.isFinite(candidate.stats.filesDiscovered)) &&
+    typeof candidate.complete === "boolean" && Array.isArray(candidate.limitations) &&
+    (!candidate.complete || (candidate.stats?.filesSkipped === 0 && candidate.stats.failedDownloads === 0 && candidate.stats.failedParsing === 0 && candidate.stats.unresolved === 0 && candidate.stats.truncatedTree === false && candidate.limitations.length === 0));
+}
+
 // Persist only the serializable parts (not AbortController)
 type PersistedState = Pick<
   RepositoryStoreState,
-  "analyzedRepositories" | "activeRepositoryId"
+  "analyzedRepositories" | "activeRepositoryId" | "changeSets" | "activeChangeSetId"
+  | "revisionSnapshots"
 >;
 
 // ------------------------------------------------------------------
@@ -84,6 +110,9 @@ export const useRepositoryStore = create<RepositoryStore>()(
     (set, get) => ({
       // ── State ──────────────────────────────────────────────────────────
       analyzedRepositories: {},
+      changeSets: {},
+      activeChangeSetId: null,
+      revisionSnapshots: {},
       activeRepositoryId: null,
       isAnalyzing: false,
       progress: emptyProgress(),
@@ -135,6 +164,56 @@ export const useRepositoryStore = create<RepositoryStore>()(
         });
       },
 
+      storeChangeSet(changeSet) {
+        set((state) => {
+          const changeSets = { ...state.changeSets, [changeSet.id]: changeSet };
+          const sorted = Object.values(changeSets).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+          while (sorted.length > 20) {
+            const removed = sorted.shift();
+            if (removed) delete changeSets[removed.id];
+          }
+          return { changeSets, activeChangeSetId: changeSet.id };
+        });
+      },
+
+      clearActiveChangeSet() {
+        set({ activeChangeSetId: null });
+      },
+
+      storeRevisionSnapshot(snapshot) {
+        if (!snapshot || typeof snapshot !== "object" || typeof snapshot.repositoryId !== "string" || typeof snapshot.commitSha !== "string" || !isValidRevisionSnapshot(snapshot, snapshot.repositoryId, snapshot.commitSha)) return;
+        set((state) => {
+          const snapshots = state.revisionSnapshots && typeof state.revisionSnapshots === "object" ? { ...state.revisionSnapshots } : {};
+          const existingSnapshots = Array.isArray(snapshots[snapshot.repositoryId]) ? snapshots[snapshot.repositoryId] : [];
+          const repositorySnapshots = existingSnapshots
+            .filter((item) => item.commitSha !== snapshot.commitSha);
+          repositorySnapshots.push(snapshot);
+          repositorySnapshots.sort((a, b) => a.analyzedAt.localeCompare(b.analyzedAt));
+          snapshots[snapshot.repositoryId] = repositorySnapshots.slice(-2);
+          return { revisionSnapshots: snapshots };
+        });
+      },
+
+      getRevisionSnapshot(repositoryId, commitSha) {
+        if (!commitSha) return null;
+        const cache: unknown = get().revisionSnapshots;
+        const stored: unknown = cache && typeof cache === "object" ? (cache as Record<string, unknown>)[repositoryId] : undefined;
+        const candidate = (Array.isArray(stored) ? stored : []).find((item: unknown) =>
+          Boolean(item && typeof item === "object" && (item as RepositoryGraphSnapshot).commitSha?.toLowerCase() === commitSha.toLowerCase()),
+        );
+        return candidate && isValidRevisionSnapshot(candidate, repositoryId, commitSha) ? candidate : null;
+      },
+
+      getRevisionSnapshots(repositoryId) {
+        const cache: unknown = get().revisionSnapshots;
+        const stored: unknown = cache && typeof cache === "object" ? (cache as Record<string, unknown>)[repositoryId] : undefined;
+        return Array.isArray(stored) ? stored.filter((item): item is RepositoryGraphSnapshot => {
+          if (!item || typeof item !== "object") return false;
+          const commitSha = (item as Partial<RepositoryGraphSnapshot>).commitSha;
+          return typeof commitSha === "string" && isValidRevisionSnapshot(item, repositoryId, commitSha);
+        }) : [];
+      },
+
       failAnalysis(error) {
         set({
           isAnalyzing: false,
@@ -162,8 +241,14 @@ export const useRepositoryStore = create<RepositoryStore>()(
         set((state) => {
           const next = { ...state.analyzedRepositories };
           delete next[id];
+          const changeSets = Object.fromEntries(Object.entries(state.changeSets).filter(([, changeSet]) => changeSet.repositoryId !== id));
+          const revisionSnapshots = { ...state.revisionSnapshots };
+          delete revisionSnapshots[id];
           return {
             analyzedRepositories: next,
+            changeSets,
+            revisionSnapshots,
+            activeChangeSetId: state.activeChangeSetId && !changeSets[state.activeChangeSetId] ? null : state.activeChangeSetId,
             activeRepositoryId:
               state.activeRepositoryId === id ? null : state.activeRepositoryId,
           };
@@ -173,7 +258,10 @@ export const useRepositoryStore = create<RepositoryStore>()(
       clearAll() {
         set({
           analyzedRepositories: {},
+          changeSets: {},
+          revisionSnapshots: {},
           activeRepositoryId: null,
+          activeChangeSetId: null,
         });
       },
 
@@ -192,6 +280,11 @@ export const useRepositoryStore = create<RepositoryStore>()(
         }
         return null;
       },
+
+      getActiveChangeSet() {
+        const { activeChangeSetId, changeSets } = get();
+        return activeChangeSetId ? changeSets[activeChangeSetId] ?? null : null;
+      },
     }),
 
     {
@@ -202,6 +295,9 @@ export const useRepositoryStore = create<RepositoryStore>()(
       partialize: (state): PersistedState => ({
         analyzedRepositories: state.analyzedRepositories,
         activeRepositoryId: state.activeRepositoryId,
+        changeSets: state.changeSets,
+        activeChangeSetId: state.activeChangeSetId,
+        revisionSnapshots: state.revisionSnapshots,
       }),
 
       // Limit stored size: strip graph positions and file content proxies

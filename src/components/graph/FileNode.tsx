@@ -18,7 +18,7 @@ export type FileNodeData = {
   kind: FileKind;
   dependencies: number;
   dependents: number;
-  highlightRole?: "selected" | "dependency" | "dependent" | "transitiveDependency" | "transitiveDependent" | "directImpact" | "transitiveImpact" | "dimmed" | "idle";
+  highlightRole?: "selected" | "dependency" | "dependent" | "transitiveDependency" | "transitiveDependent" | "directImpact" | "transitiveImpact" | "changed" | "impactPath" | "dimmed" | "idle";
 };
 
 export type FileFlowNode = Node<FileNodeData, "file">;
@@ -91,6 +91,8 @@ export default function FileNode({ data, selected }: NodeProps<FileFlowNode>) {
         role === "transitiveDependent" && "border-orange-700/60 shadow-orange-500/10",
         role === "directImpact" && "border-amber-400 shadow-amber-500/20 ring-1 ring-amber-400/30",
         role === "transitiveImpact" && "border-orange-400/60 shadow-orange-500/10",
+        role === "changed" && "border-red-400 bg-red-500/[0.08] shadow-red-500/20 ring-1 ring-red-400/30",
+        role === "impactPath" && "border-violet-400/70 shadow-violet-500/20",
         role === "dimmed" && "border-white/5 opacity-30",
         role === "idle" && "border-white/10",
       )}

@@ -102,6 +102,56 @@ export function getDependencyPath(index: GraphIndex, fromId: string, toId: strin
   return null;
 }
 
+export function getShortestDependencyPaths(
+  index: GraphIndex,
+  fromId: string,
+  toId: string,
+  maxPaths = 3,
+  knownDistances?: Map<string, number>,
+): { paths: string[][]; truncated: boolean } {
+  if (!index.filesById.has(fromId) || !index.filesById.has(toId)) return { paths: [], truncated: false };
+  if (fromId === toId) return { paths: [[fromId]], truncated: false };
+  const limit = Math.max(1, Math.min(10, Math.floor(maxPaths)));
+  const distances = knownDistances ?? getTransitiveDependentDistances(index, toId);
+  const fromDistance = distances.get(fromId);
+  if (fromDistance == null) return { paths: [], truncated: false };
+
+  const paths: string[][] = [];
+  const path = [fromId];
+  const stack: Array<{ id: string; next: number }> = [{ id: fromId, next: 0 }];
+  let truncated = false;
+  while (stack.length) {
+    const frame = stack[stack.length - 1];
+    if (frame.id === toId) {
+      paths.push([...path]);
+      if (paths.length > limit) {
+        truncated = true;
+        break;
+      }
+      stack.pop();
+      path.pop();
+      continue;
+    }
+    const neighbors = index.dependencies.get(frame.id) ?? [];
+    const currentDistance = frame.id === toId ? 0 : distances.get(frame.id);
+    let descended = false;
+    while (frame.next < neighbors.length) {
+      const next = neighbors[frame.next++];
+      const nextDistance = next === toId ? 0 : distances.get(next);
+      if (currentDistance == null || nextDistance !== currentDistance - 1) continue;
+      stack.push({ id: next, next: 0 });
+      path.push(next);
+      descended = true;
+      break;
+    }
+    if (!descended) {
+      stack.pop();
+      path.pop();
+    }
+  }
+  return { paths: paths.slice(0, limit), truncated };
+}
+
 export function getCircularDependencyGroup(index: GraphIndex, fileId: string): string[] | null {
   return index.circularGroupByFile.get(fileId) ?? null;
 }
@@ -205,6 +255,11 @@ export function getTransitiveDependents(
   return traverse(index.dependents, fileId);
 }
 
+/** Distances only, for callers that do not need a path copied for every node. */
+export function getTransitiveDependentDistances(index: GraphIndex, fileId: string): Map<string, number> {
+  return traverseDistances(index.dependents, fileId);
+}
+
 export function getReachableNodeIds(index: GraphIndex, fileId: string, direction: "dependencies" | "dependents"): Set<string> {
   const adjacency = direction === "dependencies" ? index.dependencies : index.dependents;
   const visited = new Set<string>();
@@ -246,6 +301,24 @@ function traverse(
   }
 
   return result;
+}
+
+function traverseDistances(adjacency: Map<string, string[]>, startId: string): Map<string, number> {
+  const distances = new Map<string, number>();
+  if (!adjacency.has(startId)) return distances;
+  distances.set(startId, 0);
+  const queue = [startId];
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const current = queue[cursor];
+    const depth = distances.get(current)!;
+    for (const neighbor of adjacency.get(current) ?? []) {
+      if (distances.has(neighbor)) continue;
+      distances.set(neighbor, depth + 1);
+      queue.push(neighbor);
+    }
+  }
+  distances.delete(startId);
+  return distances;
 }
 
 /**

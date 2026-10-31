@@ -6,6 +6,7 @@ import {
   Settings,
   ShieldAlert,
   Workflow,
+  GitCompareArrows,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +14,7 @@ const navigation = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
   { name: "Repositories", href: "/repositories", icon: GitBranch },
   { name: "Dependency Graph", href: "/graph", icon: Workflow },
+  { name: "Change Analysis", href: "/changes", icon: GitCompareArrows },
   { name: "Impact Analysis", href: "/impact", icon: ShieldAlert },
 ];
 

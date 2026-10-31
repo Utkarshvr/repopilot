@@ -6,6 +6,7 @@ import {
   Controls,
   MiniMap,
   ReactFlowProvider,
+  useReactFlow,
   useEdgesState,
   useNodesState,
   type Edge,
@@ -30,6 +31,14 @@ import { useAppStore } from "@/store/useAppStore";
 import type { DependencyGraphData, GraphSelectionHighlight } from "@/types";
 
 const nodeTypes = { file: FileNode };
+
+export type GraphImpactHighlight = {
+  direct: Set<string>;
+  transitive: Set<string>;
+  changed?: Set<string>;
+  pathNodeIds?: Set<string>;
+  pathEdgeIds?: Set<string>;
+};
 
 function buildInitialNodes(graph: DependencyGraphData): FileFlowNode[] {
   return graph.files.map((file) => ({
@@ -61,15 +70,19 @@ function applyHighlightToNodes(
   nodes: FileFlowNode[],
   highlight: GraphSelectionHighlight,
   highlightMode: "dependencies" | "dependents" | "neighborhood",
-  directImpactIds?: Set<string>,
-  transitiveImpactIds?: Set<string>,
+  impact?: GraphImpactHighlight,
 ): FileFlowNode[] {
-  return nodes.map((node) => {
+  let changed = false;
+  const next = nodes.map((node) => {
     let highlightRole: FileNodeData["highlightRole"] = "idle";
-    if (highlight.selectedId) {
+    if (impact) {
+      if (impact.changed?.has(node.id)) highlightRole = "changed";
+      else if (impact.direct.has(node.id)) highlightRole = "directImpact";
+      else if (impact.transitive.has(node.id)) highlightRole = "transitiveImpact";
+      else if (impact.pathNodeIds?.has(node.id)) highlightRole = "impactPath";
+      else highlightRole = "dimmed";
+    } else if (highlight.selectedId) {
       if (node.id === highlight.selectedId) highlightRole = "selected";
-      else if (directImpactIds?.has(node.id)) highlightRole = "directImpact";
-      else if (transitiveImpactIds?.has(node.id)) highlightRole = "transitiveImpact";
       else if (highlight.dependencyIds.has(node.id) && highlightMode !== "dependents")
         highlightRole = "dependency";
       else if (highlight.dependentIds.has(node.id) && highlightMode !== "dependencies")
@@ -81,36 +94,46 @@ function applyHighlightToNodes(
       else highlightRole = "dimmed";
     }
 
+    const selected = node.id === highlight.selectedId;
+    if (node.selected === selected && node.data.highlightRole === highlightRole) return node;
+    changed = true;
     return {
       ...node,
-      selected: node.id === highlight.selectedId,
+      selected,
       data: { ...node.data, highlightRole },
     };
   });
+  return changed ? next : nodes;
 }
 
 function applyHighlightToEdges(
   edges: Edge[],
   highlight: GraphSelectionHighlight,
-  impactIds?: Set<string>,
+  impact?: GraphImpactHighlight,
 ): Edge[] {
-  return edges.map((edge) => {
-    const active =
-      (!highlight.selectedId || highlight.highlightedEdgeIds.has(edge.id)) ||
-      Boolean(impactIds?.has(edge.source) && impactIds.has(edge.target));
+  let changed = false;
+  const next = edges.map((edge) => {
+    const active = impact
+      ? Boolean(impact.pathEdgeIds?.has(edge.id))
+      : (!highlight.selectedId || highlight.highlightedEdgeIds.has(edge.id));
 
+    const animated = Boolean(highlight.selectedId && active);
+    const style = {
+      stroke: impact?.pathEdgeIds?.has(edge.id)
+        ? "#a78bfa"
+        : active && highlight.selectedId ? "#818cf8" : "#3f3f46",
+      strokeWidth: active ? 2 : 1,
+      opacity: impact ? (active ? 1 : 0.08) : !highlight.selectedId ? 0.55 : active ? 1 : 0.12,
+    };
+    if (edge.animated === animated && edge.style?.stroke === style.stroke && edge.style?.strokeWidth === style.strokeWidth && edge.style?.opacity === style.opacity) return edge;
+    changed = true;
     return {
       ...edge,
-      animated: Boolean(highlight.selectedId && active),
-      style: {
-        stroke: impactIds?.has(edge.source) && impactIds.has(edge.target)
-          ? "#f59e0b"
-          : active && highlight.selectedId ? "#818cf8" : "#3f3f46",
-        strokeWidth: active ? 2 : 1,
-        opacity: !highlight.selectedId ? 0.55 : active ? 1 : 0.12,
-      },
+      animated,
+      style,
     };
   });
+  return changed ? next : edges;
 }
 
 function DependencyGraphCanvas({
@@ -122,13 +145,14 @@ function DependencyGraphCanvas({
   graph: DependencyGraphData;
   heightClass?: string;
   showInfoPanel?: boolean;
-  highlightedImpact?: { direct: Set<string>; transitive: Set<string> };
+  highlightedImpact?: GraphImpactHighlight;
 }) {
   const selectedFileId = useAppStore((s) => s.selectedFileId);
   const setSelectedFileId = useAppStore((s) => s.setSelectedFileId);
   const clearSelection = useAppStore((s) => s.clearSelection);
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightMode, setHighlightMode] = useState<"dependencies" | "dependents" | "neighborhood">("neighborhood");
+  const { setCenter } = useReactFlow();
 
   const index = useMemo(() => buildGraphIndex(graph), [graph]);
   const highlight = useMemo(
@@ -149,11 +173,14 @@ function DependencyGraphCanvas({
   }, [graph, setNodes, setEdges]);
 
   useEffect(() => {
-    setNodes((current) => applyHighlightToNodes(current, highlight, highlightMode, highlightedImpact?.direct, highlightedImpact?.transitive));
-    const impactIds = highlightedImpact
-      ? new Set([highlight.selectedId, ...highlightedImpact.direct, ...highlightedImpact.transitive].filter((id): id is string => Boolean(id)))
-      : undefined;
-    setEdges((current) => applyHighlightToEdges(current, highlight, impactIds));
+    if (!selectedFileId) return;
+    const node = nodes.find((candidate) => candidate.id === selectedFileId);
+    if (node) setCenter(node.position.x + 110, node.position.y + 52, { zoom: 1.15, duration: 350 });
+  }, [nodes, selectedFileId, setCenter]);
+
+  useEffect(() => {
+    setNodes((current) => applyHighlightToNodes(current, highlight, highlightMode, highlightedImpact));
+    setEdges((current) => applyHighlightToEdges(current, highlight, highlightedImpact));
   }, [highlight, highlightMode, highlightedImpact, setNodes, setEdges]);
 
   const handleNodeClick: NodeMouseHandler<FileFlowNode> = useCallback(
@@ -263,7 +290,7 @@ function DependencyGraphCanvas({
               className="!border !border-white/10 !bg-[#18181f]"
             />
             <GraphControls />
-            <GraphLegend />
+            <GraphLegend impactMode={Boolean(highlightedImpact)} />
           </ReactFlow>
         </div>
 
@@ -308,7 +335,7 @@ export default function DependencyGraph({
   graph: DependencyGraphData;
   heightClass?: string;
   showInfoPanel?: boolean;
-  highlightedImpact?: { direct: Set<string>; transitive: Set<string> };
+  highlightedImpact?: GraphImpactHighlight;
 }) {
   return (
     <ReactFlowProvider>

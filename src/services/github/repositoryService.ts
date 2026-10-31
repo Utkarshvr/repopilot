@@ -8,6 +8,7 @@ import {
 import { classifyRepositoryFile, filterSourceFiles, getFileName, isConfigPath } from "@/lib/analysis/fileFilter";
 import { analyzeProjectMetadata, type MetadataContentResult } from "@/lib/analysis/projectMetadata";
 import { extractImportsFromSource } from "@/lib/analysis/astParser";
+import { cacheFileContent, extractImportsCached, getCachedFileContent } from "@/lib/analysis/contentAnalysisCache";
 import { resolveAllImports } from "@/lib/analysis/dependencyResolver";
 import { buildDependencyGraph } from "@/lib/analysis/graphBuilder";
 import { toRepositoryView } from "@/types/analysis";
@@ -26,6 +27,11 @@ import type { ParsedGitHubUrl } from "@/types/analysis";
 import { DEFAULT_ANALYSIS_LIMITS, emptyProgress } from "@/types/analysis";
 
 export type ProgressCallback = (progress: AnalysisProgress) => void;
+
+export interface RepositoryAnalysisTarget {
+  ref: string;
+  commitSha: string;
+}
 
 function updateProgress(
   current: AnalysisProgress,
@@ -52,6 +58,7 @@ export async function runAnalysisPipeline(
   limits: AnalysisLimits = DEFAULT_ANALYSIS_LIMITS,
   onProgress: ProgressCallback = () => {},
   signal?: AbortSignal,
+  target?: RepositoryAnalysisTarget,
 ): Promise<AnalysisPipelineResult> {
   const startMs = Date.now();
   let progress = emptyProgress("validating", "Validating repository URL…");
@@ -70,13 +77,14 @@ export async function runAnalysisPipeline(
   }
 
   // ── Stage 2: Fetch file tree ─────────────────────────────────────────────
-  progress = withStage(progress, "fetching-tree", `Fetching file tree (${metadata.defaultBranch})…`);
+  const analysisRef = target?.commitSha ?? metadata.defaultBranch;
+  progress = withStage(progress, "fetching-tree", `Fetching file tree (${analysisRef})…`);
   onProgress(progress);
 
-  const { entries, truncated } = await fetchRepositoryTree(
+  const { entries, truncated, treeSha } = await fetchRepositoryTree(
     parsed.owner,
     parsed.repo,
-    metadata.defaultBranch,
+    analysisRef,
     signal,
   );
 
@@ -101,9 +109,11 @@ export async function runAnalysisPipeline(
   const metadataContents: Record<string, MetadataContentResult> = {};
   await mapPool(metadataEntries, Math.min(limits.contentConcurrency, 4), async (entry) => {
     try {
-      const content = await fetchRawFileContent(
-        parsed.owner, parsed.repo, metadata.defaultBranch, entry.path, signal,
-      );
+      let content = getCachedFileContent(entry.sha);
+      if (content == null) {
+        content = await fetchRawFileContent(parsed.owner, parsed.repo, analysisRef, entry.path, signal);
+      }
+      if (new TextEncoder().encode(content).byteLength <= limits.maxFileBytes) cacheFileContent(entry.sha, content);
       metadataContents[entry.path] = { content };
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw error;
@@ -162,18 +172,16 @@ export async function runAnalysisPipeline(
         throw new DOMException("Analysis cancelled", "AbortError");
       }
       try {
-        const content = await fetchRawFileContent(
-          parsed.owner,
-          parsed.repo,
-          metadata.defaultBranch,
-          entry.path,
-          signal,
-        );
+        let content = getCachedFileContent(entry.sha);
+        if (content == null) {
+          content = await fetchRawFileContent(parsed.owner, parsed.repo, analysisRef, entry.path, signal);
+        }
         fetched++;
         if (new TextEncoder().encode(content).byteLength > limits.maxFileBytes) {
           fileOutcomes.push({ path: entry.path, status: "skipped", reason: "file-too-large", detail: `Fetched content exceeds ${limits.maxFileBytes.toLocaleString()} bytes.` });
           return null;
         }
+        cacheFileContent(entry.sha, content);
         const name = entry.path.split("/").pop() ?? entry.path;
         const dotIdx = name.lastIndexOf(".");
         const extension = dotIdx > 0 ? name.slice(dotIdx) : "";
@@ -241,7 +249,7 @@ export async function runAnalysisPipeline(
     const batch = validSourceFiles.slice(i, i + limits.parseBatchSize);
     for (const file of batch) {
       try {
-        const imports = await extractImportsFromSource(file.path, file.content);
+        const { imports } = await extractImportsCached(file.path, file.content, extractImportsFromSource);
         allImports.push(...imports);
         parsedSourceFiles.push(file);
         fileOutcomes.push({ path: file.path, status: "parsed" });
@@ -302,6 +310,11 @@ export async function runAnalysisPipeline(
   const repositoryId = `github:${metadata.fullName}`;
   const fileSizes = Object.fromEntries(parsedSourceFiles.map((file) => [file.path, file.size]));
   const graph = buildDependencyGraph(filePaths, resolved, repositoryId, fileSizes);
+  graph.revision = {
+    ref: target?.ref ?? metadata.defaultBranch,
+    commitSha: target?.commitSha ?? null,
+    treeSha,
+  };
 
   progress = updateProgress(progress, {
     edgesBuilt: graph.edges.length,
@@ -369,7 +382,7 @@ export async function runAnalysisPipeline(
         durationMs,
       },
       analyzedAt: new Date().toISOString(),
-      branch: metadata.defaultBranch,
+      branch: target?.ref ?? metadata.defaultBranch,
     },
     progress,
   };

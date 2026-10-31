@@ -270,6 +270,28 @@ export interface AnalyzedRepository {
   branch: string;
 }
 
+export interface RepositoryGraphSnapshot {
+  id: string;
+  repositoryId: string;
+  repositoryFullName: string;
+  owner: string;
+  repo: string;
+  commitSha: string;
+  ref: string;
+  treeSha: string;
+  analyzedAt: string;
+  stats: AnalysisStats;
+  fileOutcomes: FileAnalysisOutcome[];
+  fileClassifications: RepositoryFileClassification[];
+  graph: DependencyGraphData;
+  externalPackages: string[];
+  unresolvedImports: ResolvedImport[];
+  projectMetadata: ProjectMetadataAnalysis | null;
+  complete: boolean;
+  limitations: string[];
+  parserMetadata: { name: "typescript-compiler-api"; cacheVersion: 1 };
+}
+
 export interface AnalysisPipelineResult {
   analyzed: AnalyzedRepository;
   progress: AnalysisProgress;

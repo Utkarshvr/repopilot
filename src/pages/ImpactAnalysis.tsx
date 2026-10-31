@@ -8,10 +8,18 @@ import { useAppStore } from "@/store/useAppStore";
 import { Link } from "react-router-dom";
 import { Info, Search } from "lucide-react";
 import DependencyGraph from "@/components/graph/DependencyGraph";
+import { analyzeChangeImpact, currentGraphSnapshot } from "@/lib/impact";
+import { ChangeImpactReportView } from "@/components/impact/ChangeImpactReportView";
+import type { RepositoryGraphSnapshot } from "@/types/analysis";
+
+const EMPTY_REVISION_SNAPSHOTS: RepositoryGraphSnapshot[] = [];
 
 export default function ImpactAnalysis() {
   const graph = useRepositoryStore((s) => s.getActiveGraph());
   const analyzed = useRepositoryStore((s) => s.getActiveAnalyzed());
+  const revisionSnapshots = useRepositoryStore((s) => s.revisionSnapshots?.[analyzed?.id ?? ""] ?? EMPTY_REVISION_SNAPSHOTS);
+  const activeChangeSet = useRepositoryStore((s) => s.getActiveChangeSet());
+  const clearActiveChangeSet = useRepositoryStore((s) => s.clearActiveChangeSet);
 
   const selectedFileId = useAppStore((s) => s.selectedFileId);
   const setSelectedFileId = useAppStore((s) => s.setSelectedFileId);
@@ -19,6 +27,13 @@ export default function ImpactAnalysis() {
   const [search, setSearch] = useState("");
 
   const isReal = graph.provenance === "analyzed";
+  const matchingChangeSet = activeChangeSet?.repositoryId === analyzed?.id ? activeChangeSet : null;
+  const baseRevisionSnapshot = matchingChangeSet?.baseSha
+    ? revisionSnapshots.find((snapshot) => snapshot.commitSha === matchingChangeSet.baseSha) ?? null
+    : null;
+  const headRevisionSnapshot = matchingChangeSet?.headSha
+    ? revisionSnapshots.find((snapshot) => snapshot.commitSha === matchingChangeSet.headSha) ?? null
+    : null;
 
   const filteredFiles = useMemo(() => {
     if (!search.trim()) return graph.files;
@@ -29,9 +44,10 @@ export default function ImpactAnalysis() {
   }, [graph.files, search]);
 
   const impact = useMemo(
-    () =>
-      selectedFileId ? computeChangeImpact(graph, selectedFileId) : null,
-    [graph, selectedFileId],
+    () => selectedFileId && !matchingChangeSet
+      ? computeChangeImpact(graph, selectedFileId)
+      : null,
+    [graph, selectedFileId, matchingChangeSet],
   );
 
   // Auto-update impact provenance label
@@ -45,6 +61,35 @@ export default function ImpactAnalysis() {
         : "Connect a public repository to calculate impact from extracted dependencies.",
     };
   }, [impact, isReal]);
+
+  const singleFileGraphHighlight = useMemo(() => impact ? ({
+    direct: new Set(impact.directDependents.map((file) => file.fileId)),
+    transitive: new Set(impact.transitiveDependents.map((file) => file.fileId)),
+  }) : undefined, [impact]);
+
+  const changeImpactReport = useMemo(() => matchingChangeSet && analyzed
+    ? analyzeChangeImpact({
+        changeSet: matchingChangeSet,
+        currentGraph: {
+          ...currentGraphSnapshot(analyzed),
+          complete: analyzed.stats.truncatedTree === false && analyzed.stats.filesSkipped === 0 && analyzed.stats.failedDownloads === 0 && analyzed.stats.failedParsing === 0 && analyzed.stats.unresolved === 0 && !(analyzed.projectMetadata?.outcomes.some((outcome) => outcome.status === "failed" || outcome.status === "not-processed") ?? false),
+          limitations: [
+            ...(analyzed.stats.truncatedTree ? ["Recursive GitHub tree response was truncated."] : []),
+            ...(analyzed.stats.filesSkipped ? [`${analyzed.stats.filesSkipped} eligible files were skipped.`] : []),
+            ...(analyzed.stats.failedDownloads ? [`${analyzed.stats.failedDownloads} downloads failed.`] : []),
+            ...(analyzed.stats.failedParsing ? [`${analyzed.stats.failedParsing} files failed parsing.`] : []),
+            ...(analyzed.stats.unresolved ? [`${analyzed.stats.unresolved} imports are unresolved.`] : []),
+            ...(analyzed.projectMetadata?.outcomes.some((outcome) => outcome.status === "failed" || outcome.status === "not-processed") ? ["At least one project metadata/configuration file was unavailable or unprocessed."] : []),
+          ],
+        },
+        baseGraph: baseRevisionSnapshot ? { graph: baseRevisionSnapshot.graph, role: "base", revision: { ref: baseRevisionSnapshot.ref, commitSha: baseRevisionSnapshot.commitSha, treeSha: baseRevisionSnapshot.treeSha }, complete: baseRevisionSnapshot.complete, limitations: baseRevisionSnapshot.limitations, label: `Base commit ${baseRevisionSnapshot.commitSha.slice(0, 12)} · ${baseRevisionSnapshot.stats.filesAnalyzed} files` } : undefined,
+        headGraph: headRevisionSnapshot ? { graph: headRevisionSnapshot.graph, role: "head", revision: { ref: headRevisionSnapshot.ref, commitSha: headRevisionSnapshot.commitSha, treeSha: headRevisionSnapshot.treeSha }, complete: headRevisionSnapshot.complete, limitations: headRevisionSnapshot.limitations, label: `Head commit ${headRevisionSnapshot.commitSha.slice(0, 12)} · ${headRevisionSnapshot.stats.filesAnalyzed} files` } : undefined,
+        unresolvedImports: [...(baseRevisionSnapshot?.unresolvedImports ?? []), ...(headRevisionSnapshot?.unresolvedImports ?? []), ...(!baseRevisionSnapshot && !headRevisionSnapshot ? analyzed.unresolvedImports : [])],
+      })
+    : null, [matchingChangeSet, analyzed, baseRevisionSnapshot, headRevisionSnapshot]);
+
+  if (matchingChangeSet && analyzed && changeImpactReport)
+    return <ChangeImpactReportView analyzed={analyzed} report={changeImpactReport} changeSet={matchingChangeSet} baseSnapshot={baseRevisionSnapshot} headSnapshot={headRevisionSnapshot} onClearChangeSet={clearActiveChangeSet} />;
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
@@ -118,10 +163,7 @@ export default function ImpactAnalysis() {
           <DependencyGraph
             graph={graph}
             heightClass="h-[min(65vh,620px)]"
-            highlightedImpact={{
-              direct: new Set(impact.directDependents.map((file) => file.fileId)),
-              transitive: new Set(impact.transitiveDependents.map((file) => file.fileId)),
-            }}
+            highlightedImpact={singleFileGraphHighlight}
           />
         </section>
       )}

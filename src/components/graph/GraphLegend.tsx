@@ -1,5 +1,11 @@
-export default function GraphLegend() {
-  const items = [
+export default function GraphLegend({ impactMode = false }: { impactMode?: boolean }) {
+  const items = impactMode ? [
+    { color: "bg-red-400", label: "Changed file" },
+    { color: "bg-amber-400", label: "Directly affected" },
+    { color: "bg-orange-400", label: "Transitively affected" },
+    { color: "bg-violet-400", label: "Shortest path" },
+    { color: "bg-zinc-600", label: "Not in selected impact paths" },
+  ] : [
     { color: "bg-indigo-400", label: "Selected" },
     { color: "bg-sky-400", label: "Dependency (imports)" },
     { color: "bg-amber-400", label: "Dependent (imported by)" },

@@ -61,6 +61,12 @@ export interface DependencyGraphData {
   repositoryId: string;
   generatedAt: string;
   note: string;
+  /** Immutable tree identity when available; older/mock graphs may omit it. */
+  revision?: {
+    ref: string | null;
+    commitSha: string | null;
+    treeSha: string | null;
+  };
 }
 
 export interface Repository {
