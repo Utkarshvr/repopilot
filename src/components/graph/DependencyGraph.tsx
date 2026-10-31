@@ -1,227 +1,257 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
+  ReactFlowProvider,
   useEdgesState,
   useNodesState,
-  type Node,
   type Edge,
   type NodeMouseHandler,
 } from "@xyflow/react";
-
 import "@xyflow/react/dist/style.css";
 
-import FileNode, { type FileNodeData } from "./FileNode";
+import FileNode, {
+  type FileFlowNode,
+  type FileNodeData,
+} from "./FileNode";
 import GraphControls from "./GraphControls";
-
-const initialNodes: Node<FileNodeData>[] = [
-  {
-    id: "app",
-    position: { x: 350, y: 200 },
-    data: {
-      label: "App.tsx",
-      path: "src/App.tsx",
-      type: "page",
-      dependencies: 3,
-    },
-    type: "file",
-  },
-  {
-    id: "dashboard",
-    position: { x: 650, y: 80 },
-    data: {
-      label: "Dashboard.tsx",
-      path: "src/pages/Dashboard.tsx",
-      type: "page",
-      dependencies: 2,
-    },
-    type: "file",
-  },
-  {
-    id: "layout",
-    position: { x: 650, y: 300 },
-    data: {
-      label: "AppLayout.tsx",
-      path: "src/components/layout/AppLayout.tsx",
-      type: "component",
-      dependencies: 2,
-    },
-    type: "file",
-  },
-  {
-    id: "sidebar",
-    position: { x: 950, y: 220 },
-    data: {
-      label: "Sidebar.tsx",
-      path: "src/components/layout/Sidebar.tsx",
-      type: "component",
-      dependencies: 1,
-    },
-    type: "file",
-  },
-  {
-    id: "header",
-    position: { x: 950, y: 390 },
-    data: {
-      label: "Header.tsx",
-      path: "src/components/layout/Header.tsx",
-      type: "component",
-      dependencies: 1,
-    },
-    type: "file",
-  },
-  {
-    id: "utils",
-    position: { x: 350, y: 450 },
-    data: {
-      label: "utils.ts",
-      path: "src/lib/utils.ts",
-      type: "utility",
-      dependencies: 0,
-    },
-    type: "file",
-  },
-];
-
-const initialEdges: Edge[] = [
-  { id: "e1", source: "app", target: "dashboard", animated: true },
-  { id: "e2", source: "app", target: "layout", animated: true },
-  { id: "e3", source: "layout", target: "sidebar" },
-  { id: "e4", source: "layout", target: "header" },
-  { id: "e5", source: "dashboard", target: "utils" },
-  { id: "e6", source: "layout", target: "utils" },
-];
+import GraphLegend from "./GraphLegend";
+import GraphInfoPanel from "./GraphInfoPanel";
+import { MockBadge } from "@/components/shared/MockBadge";
+import { repoPilotGraph } from "@/data/mockDependencyGraph";
+import {
+  buildGraphIndex,
+  computeSelectionHighlight,
+} from "@/lib/graph";
+import { useAppStore } from "@/store/useAppStore";
+import type { DependencyGraphData, GraphSelectionHighlight } from "@/types";
 
 const nodeTypes = { file: FileNode };
 
-export default function DependencyGraph() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+function buildInitialNodes(graph: DependencyGraphData): FileFlowNode[] {
+  return graph.files.map((file) => ({
+    id: file.id,
+    type: "file" as const,
+    position: graph.positions[file.id] ?? { x: 0, y: 0 },
+    data: {
+      label: file.name,
+      path: file.path,
+      kind: file.kind,
+      dependencies: file.dependencyCount,
+      dependents: file.dependentCount,
+      highlightRole: "idle" as const,
+    },
+  }));
+}
 
-  const handleNodeClick: NodeMouseHandler = useCallback((_, node) => {
-    setSelectedNode(node.id);
-  }, []);
+function buildInitialEdges(graph: DependencyGraphData): Edge[] {
+  return graph.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    type: "smoothstep",
+    style: { stroke: "#3f3f46", strokeWidth: 1, opacity: 0.55 },
+  }));
+}
 
-  const highlightedIds = useMemo(() => {
-    if (!selectedNode) return new Set<string>();
+function applyHighlightToNodes(
+  nodes: FileFlowNode[],
+  highlight: GraphSelectionHighlight,
+): FileFlowNode[] {
+  return nodes.map((node) => {
+    let highlightRole: FileNodeData["highlightRole"] = "idle";
+    if (highlight.selectedId) {
+      if (node.id === highlight.selectedId) highlightRole = "selected";
+      else if (highlight.dependencyIds.has(node.id))
+        highlightRole = "dependency";
+      else if (highlight.dependentIds.has(node.id))
+        highlightRole = "dependent";
+      else highlightRole = "dimmed";
+    }
 
-    const connected = new Set([selectedNode]);
+    return {
+      ...node,
+      selected: node.id === highlight.selectedId,
+      data: { ...node.data, highlightRole },
+    };
+  });
+}
 
-    edges.forEach((edge) => {
-      if (edge.source === selectedNode) connected.add(edge.target);
-      if (edge.target === selectedNode) connected.add(edge.source);
-    });
+function applyHighlightToEdges(
+  edges: Edge[],
+  highlight: GraphSelectionHighlight,
+): Edge[] {
+  return edges.map((edge) => {
+    const active =
+      !highlight.selectedId || highlight.highlightedEdgeIds.has(edge.id);
 
-    return connected;
-  }, [selectedNode, edges]);
+    return {
+      ...edge,
+      animated: Boolean(highlight.selectedId && active),
+      style: {
+        stroke: active && highlight.selectedId ? "#818cf8" : "#3f3f46",
+        strokeWidth: active && highlight.selectedId ? 2 : 1,
+        opacity: !highlight.selectedId ? 0.55 : active ? 1 : 0.12,
+      },
+    };
+  });
+}
 
-  const styledNodes = useMemo(
-    () =>
-      nodes.map((node) => ({
-        ...node,
-        selected: node.id === selectedNode,
-        style: {
-          opacity: !selectedNode || highlightedIds.has(node.id) ? 1 : 0.25,
-          transition: "opacity 200ms ease",
-        },
-      })),
-    [nodes, selectedNode, highlightedIds],
+function DependencyGraphCanvas({
+  graph,
+  heightClass = "h-[560px]",
+  showInfoPanel = true,
+}: {
+  graph: DependencyGraphData;
+  heightClass?: string;
+  showInfoPanel?: boolean;
+}) {
+  const selectedFileId = useAppStore((s) => s.selectedFileId);
+  const setSelectedFileId = useAppStore((s) => s.setSelectedFileId);
+  const clearSelection = useAppStore((s) => s.clearSelection);
+
+  const index = useMemo(() => buildGraphIndex(graph), [graph]);
+  const highlight = useMemo(
+    () => computeSelectionHighlight(index, selectedFileId),
+    [index, selectedFileId],
   );
 
-  const styledEdges = useMemo(
-    () =>
-      edges.map((edge) => {
-        const active =
-          !selectedNode ||
-          (highlightedIds.has(edge.source) && highlightedIds.has(edge.target));
-
-        return {
-          ...edge,
-          animated: active && selectedNode !== null,
-          style: {
-            stroke: active ? "#818cf8" : "#38383f",
-            strokeWidth: active ? 2 : 1,
-            opacity: active ? 1 : 0.15,
-          },
-        };
-      }),
-    [edges, selectedNode, highlightedIds],
+  const [nodes, setNodes, onNodesChange] = useNodesState<FileFlowNode>(
+    buildInitialNodes(graph),
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
+    buildInitialEdges(graph),
   );
 
-  const selectedFile = nodes.find((node) => node.id === selectedNode);
+  useEffect(() => {
+    setNodes((current) => applyHighlightToNodes(current, highlight));
+    setEdges((current) => applyHighlightToEdges(current, highlight));
+  }, [highlight, setNodes, setEdges]);
+
+  const handleNodeClick: NodeMouseHandler<FileFlowNode> = useCallback(
+    (_, node) => {
+      setSelectedFileId(node.id);
+    },
+    [setSelectedFileId],
+  );
+
+  const selectedFile = selectedFileId
+    ? index.filesById.get(selectedFileId)
+    : undefined;
 
   return (
     <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#101014]">
-      <div className="flex items-center justify-between border-b border-white/[0.07] p-5">
+      <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-3.5">
         <div>
-          <h3 className="font-semibold">Dependency Graph</h3>
-          <p className="mt-1 text-xs text-zinc-500">
-            Explore relationships between source files
-          </p>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold">Dependency Graph</h3>
+            <MockBadge provenance={graph.provenance} />
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">{graph.note}</p>
         </div>
 
         <button
-          onClick={() => setSelectedNode(null)}
-          className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-400 hover:text-white"
+          type="button"
+          onClick={clearSelection}
+          className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-zinc-400 transition hover:text-white"
         >
           Clear selection
         </button>
       </div>
 
-      <div className="relative h-[520px]">
-        <ReactFlow
-          nodes={styledNodes}
-          edges={styledEdges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={handleNodeClick}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.3 }}
-          minZoom={0.2}
-          maxZoom={2}
-          proOptions={{ hideAttribution: true }}
-          onPaneClick={() => setSelectedNode(null)}
-        >
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={20}
-            size={1}
-            color="#33333a"
-          />
-
-          <Controls
-            showInteractive={false}
-            className="!border-white/10 !bg-[#18181f] [&>button]:!border-white/10 [&>button]:!bg-[#18181f] [&>button]:!fill-zinc-400"
-          />
-
-          <MiniMap
-            nodeColor="#6366f1"
-            maskColor="rgba(0,0,0,0.65)"
-            className="!border !border-white/10 !bg-[#18181f]"
-          />
-
-          <GraphControls />
-        </ReactFlow>
-      </div>
-
-      <div className="flex items-center justify-between border-t border-white/[0.07] px-5 py-3">
-        <div className="flex items-center gap-4 text-[11px] text-zinc-500">
-          <span>{nodes.length} files</span>
-          <span>{edges.length} relationships</span>
-          <span className="text-indigo-400">Interactive</span>
+      <div className={`flex flex-col lg:flex-row ${heightClass}`}>
+        <div className="relative min-h-[420px] flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={handleNodeClick}
+            onPaneClick={clearSelection}
+            nodeTypes={nodeTypes}
+            nodesDraggable
+            nodesConnectable={false}
+            elementsSelectable
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.15}
+            maxZoom={2}
+            proOptions={{ hideAttribution: true }}
+            defaultEdgeOptions={{ type: "smoothstep" }}
+          >
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={18}
+              size={1}
+              color="#2a2a32"
+            />
+            <Controls
+              showInteractive={false}
+              className="!border-white/10 !bg-[#18181f] [&>button]:!border-white/10 [&>button]:!bg-[#18181f] [&>button]:!fill-zinc-400"
+            />
+            <MiniMap
+              nodeColor={(node) => {
+                const role = (node.data as FileNodeData).highlightRole;
+                if (role === "selected") return "#818cf8";
+                if (role === "dependency") return "#38bdf8";
+                if (role === "dependent") return "#fbbf24";
+                return "#3f3f46";
+              }}
+              maskColor="rgba(0,0,0,0.7)"
+              className="!border !border-white/10 !bg-[#18181f]"
+            />
+            <GraphControls />
+            <GraphLegend />
+          </ReactFlow>
         </div>
 
-        {selectedFile && (
-          <div className="text-xs text-indigo-400">
-            Selected: {selectedFile.data.label}
-          </div>
+        {showInfoPanel && selectedFile ? (
+          <GraphInfoPanel
+            file={selectedFile}
+            highlight={highlight}
+            filesById={index.filesById}
+            onClose={clearSelection}
+          />
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] px-5 py-2.5">
+        <div className="flex items-center gap-4 text-[11px] text-zinc-500">
+          <span>{graph.files.length} files</span>
+          <span>{graph.edges.length} relationships</span>
+          <span className="text-indigo-400">Interactive · pan / zoom</span>
+        </div>
+        {selectedFile ? (
+          <p className="text-xs text-indigo-300">
+            Selected: {selectedFile.name}
+          </p>
+        ) : (
+          <p className="text-xs text-zinc-600">Click a node to inspect</p>
         )}
       </div>
     </div>
+  );
+}
+
+export default function DependencyGraph({
+  graph = repoPilotGraph,
+  heightClass,
+  showInfoPanel = true,
+}: {
+  graph?: DependencyGraphData;
+  heightClass?: string;
+  showInfoPanel?: boolean;
+}) {
+  return (
+    <ReactFlowProvider>
+      <DependencyGraphCanvas
+        graph={graph}
+        heightClass={heightClass}
+        showInfoPanel={showInfoPanel}
+      />
+    </ReactFlowProvider>
   );
 }

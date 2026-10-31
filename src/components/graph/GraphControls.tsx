@@ -7,19 +7,21 @@ export default function GraphControls() {
   return (
     <div className="absolute right-4 top-4 z-10 flex gap-2">
       <button
-        onClick={() => fitView({ padding: 0.3, duration: 400 })}
-        className="rounded-lg border border-white/10 bg-[#18181f] p-2 text-zinc-400 hover:text-white"
-        title="Fit graph"
+        type="button"
+        onClick={() => fitView({ padding: 0.25, duration: 400 })}
+        className="rounded-lg border border-white/10 bg-[#18181f] p-2 text-zinc-400 transition hover:text-white"
+        title="Fit to view"
       >
-        <Maximize size={16} />
+        <Maximize size={15} />
       </button>
 
       <button
-        onClick={() => setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 400 })}
-        className="rounded-lg border border-white/10 bg-[#18181f] p-2 text-zinc-400 hover:text-white"
-        title="Reset view"
+        type="button"
+        onClick={() => setViewport({ x: 0, y: 0, zoom: 0.85 }, { duration: 400 })}
+        className="rounded-lg border border-white/10 bg-[#18181f] p-2 text-zinc-400 transition hover:text-white"
+        title="Reset viewport"
       >
-        <RotateCcw size={16} />
+        <RotateCcw size={15} />
       </button>
     </div>
   );
