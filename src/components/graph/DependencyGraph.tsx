@@ -263,7 +263,6 @@ function DependencyGraphCanvas({
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.15}
             maxZoom={2}
-            proOptions={{ hideAttribution: true }}
             defaultEdgeOptions={{ type: "smoothstep" }}
           >
             <Background

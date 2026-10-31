@@ -13,7 +13,7 @@ export function RepositoryList({
       <EmptyState
         icon={GitBranch}
         title="No repositories yet"
-        description="Connect GitHub in Phase II to import real repositories. Mock data powers this view for now."
+        description="Connect a public GitHub repository to analyze its source files, metadata, and dependency graph."
       />
     );
   }

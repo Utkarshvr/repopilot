@@ -8,6 +8,16 @@ import { validateGitHubRevision } from "@/lib/changes";
 
 const GITHUB_API = "https://api.github.com";
 const RAW_HOST = "https://raw.githubusercontent.com";
+const REQUEST_TIMEOUT_MS = 30_000;
+
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+}
+
+function isRequestTimeout(error: unknown, signal?: AbortSignal): boolean {
+  return !signal?.aborted && error instanceof DOMException && error.name === "TimeoutError";
+}
 
 export class GitHubApiError extends Error {
   status: number;
@@ -80,13 +90,20 @@ async function githubFetch<T>(
   path: string,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(`${GITHUB_API}${path}`, {
-    signal,
-    headers: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${GITHUB_API}${path}`, {
+      signal: requestSignal(signal),
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (isRequestTimeout(error, signal)) throw new GitHubApiError(`GitHub request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds.`, 408);
+    throw error;
+  }
 
   const remaining = response.headers.get("X-RateLimit-Remaining");
   const rateLimited =
@@ -185,6 +202,11 @@ interface GhCompareResponse {
   }>;
 }
 
+interface GhCommitResponse {
+  sha?: string;
+  commit?: { tree?: { sha?: string } };
+}
+
 function encodeGitRef(ref: string): string {
   return ref.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
@@ -236,12 +258,18 @@ export async function compareRepositoryCommits(
       patch: file.patch,
     };
   });
+  // The compare endpoint does not consistently include head_commit. Resolve a
+  // missing identity by asking the commits endpoint for the exact requested ref.
+  const [resolvedBase, resolvedHead] = await Promise.all([
+    data.base_commit?.sha ? Promise.resolve(null) : githubFetch<GhCommitResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeGitRef(base.trim())}`, signal),
+    data.head_commit?.sha ? Promise.resolve(null) : githubFetch<GhCommitResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeGitRef(head.trim())}`, signal),
+  ]);
   const limitReached = files.length >= 300;
   return {
-    baseSha: typeof data.base_commit?.sha === "string" ? data.base_commit.sha : null,
-    headSha: typeof data.head_commit?.sha === "string" ? data.head_commit.sha : null,
-    baseTreeSha: typeof data.base_commit?.commit?.tree?.sha === "string" ? data.base_commit.commit.tree.sha : null,
-    headTreeSha: typeof data.head_commit?.commit?.tree?.sha === "string" ? data.head_commit.commit.tree.sha : null,
+    baseSha: data.base_commit?.sha ?? resolvedBase?.sha ?? null,
+    headSha: data.head_commit?.sha ?? resolvedHead?.sha ?? null,
+    baseTreeSha: data.base_commit?.commit?.tree?.sha ?? resolvedBase?.commit?.tree?.sha ?? null,
+    headTreeSha: data.head_commit?.commit?.tree?.sha ?? resolvedHead?.commit?.tree?.sha ?? null,
     totalCommits: Number.isFinite(data.total_commits) ? data.total_commits! : null,
     files,
     isComplete: !limitReached,
@@ -309,7 +337,14 @@ export async function fetchRawFileContent(
     .join("/");
   const url = `${RAW_HOST}/${owner}/${repo}/${encodeURIComponent(branch)}/${encodedPath}`;
 
-  const response = await fetch(url, { signal });
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: requestSignal(signal) });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (isRequestTimeout(error, signal)) throw new GitHubApiError(`Fetching ${filePath} timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds.`, 408);
+    throw error;
+  }
   if (!response.ok) {
     throw new GitHubApiError(
       `Failed to fetch ${filePath} (${response.status})`,

@@ -24,8 +24,23 @@ describe("GitHub commit comparison API", () => {
     expect(result.files[0]).toMatchObject({ filename: "src/a.ts", previous_filename: "src/old.ts", status: "renamed", patch: "diff" });
   });
 
+  it("resolves revision identities when GitHub omits head_commit from its compare response", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ total_commits: 1, files: [{ filename: "src/a.ts", status: "modified" }] }))
+      .mockResolvedValueOnce(response({ sha: "base-resolved", commit: { tree: { sha: "base-tree" } } }))
+      .mockResolvedValueOnce(response({ sha: "head-resolved", commit: { tree: { sha: "head-tree" } } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await compareRepositoryCommits("acme", "demo", "release/1", "main");
+
+    expect(result).toMatchObject({ baseSha: "base-resolved", headSha: "head-resolved", baseTreeSha: "base-tree", headTreeSha: "head-tree" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toContain("/commits/main");
+  });
+
   it("marks the 300-file API cap as potentially incomplete", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({
+      base_commit: { sha: "base" }, head_commit: { sha: "head" },
       total_commits: 1,
       files: Array.from({ length: 300 }, (_, i) => ({ filename: `src/${i}.ts`, status: "modified" })),
     })));
