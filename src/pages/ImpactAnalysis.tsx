@@ -18,7 +18,9 @@ export default function ImpactAnalysis() {
   const graph = useRepositoryStore((s) => s.getActiveGraph());
   const analyzed = useRepositoryStore((s) => s.getActiveAnalyzed());
   const revisionSnapshots = useRepositoryStore((s) => s.revisionSnapshots?.[analyzed?.id ?? ""] ?? EMPTY_REVISION_SNAPSHOTS);
+  const changeSets = useRepositoryStore((s) => s.changeSets);
   const activeChangeSet = useRepositoryStore((s) => s.getActiveChangeSet());
+  const setActiveChangeSet = useRepositoryStore((s) => s.setActiveChangeSet);
   const clearActiveChangeSet = useRepositoryStore((s) => s.clearActiveChangeSet);
 
   const selectedFileId = useAppStore((s) => s.selectedFileId);
@@ -28,6 +30,9 @@ export default function ImpactAnalysis() {
 
   const isReal = graph.provenance === "analyzed";
   const matchingChangeSet = activeChangeSet?.repositoryId === analyzed?.id ? activeChangeSet : null;
+  const availableChangeSets = useMemo(() => Object.values(changeSets)
+    .filter((changeSet) => changeSet.repositoryId === analyzed?.id)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [changeSets, analyzed?.id]);
   const baseRevisionSnapshot = matchingChangeSet?.baseSha
     ? revisionSnapshots.find((snapshot) => snapshot.commitSha === matchingChangeSet.baseSha) ?? null
     : null;
@@ -89,7 +94,7 @@ export default function ImpactAnalysis() {
     : null, [matchingChangeSet, analyzed, baseRevisionSnapshot, headRevisionSnapshot]);
 
   if (matchingChangeSet && analyzed && changeImpactReport)
-    return <ChangeImpactReportView analyzed={analyzed} report={changeImpactReport} changeSet={matchingChangeSet} baseSnapshot={baseRevisionSnapshot} headSnapshot={headRevisionSnapshot} onClearChangeSet={clearActiveChangeSet} />;
+    return <ChangeImpactReportView key={matchingChangeSet.id} analyzed={analyzed} report={changeImpactReport} changeSet={matchingChangeSet} availableChangeSets={availableChangeSets} baseSnapshot={baseRevisionSnapshot} headSnapshot={headRevisionSnapshot} onSelectChangeSet={setActiveChangeSet} onClearChangeSet={clearActiveChangeSet} />;
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">

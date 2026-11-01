@@ -55,7 +55,10 @@ export async function extractImportsCached(
   }
 
   const imports = await extract(filePath, content);
-  const reusable = imports.map(({ importingFile: _path, ...item }) => item);
+  const reusable = imports.map(({ importingFile: sourcePath, ...item }) => {
+    void sourcePath;
+    return item;
+  });
   extractionCache.set(key, reusable);
   while (extractionCache.size > MAX_CACHE_ENTRIES) extractionCache.delete(extractionCache.keys().next().value!);
   return { imports, contentHash, cacheHit: false };

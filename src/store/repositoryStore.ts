@@ -42,6 +42,7 @@ export interface RepositoryStoreActions {
   /** Store a completed analysis result */
   storeAnalysis: (result: AnalyzedRepository) => void;
   storeChangeSet: (changeSet: ChangeSet) => void;
+  setActiveChangeSet: (id: string | null) => void;
   clearActiveChangeSet: () => void;
   storeRevisionSnapshot: (snapshot: RepositoryGraphSnapshot) => void;
   getRevisionSnapshot: (repositoryId: string, commitSha: string | null | undefined) => RepositoryGraphSnapshot | null;
@@ -174,6 +175,12 @@ export const useRepositoryStore = create<RepositoryStore>()(
           }
           return { changeSets, activeChangeSetId: changeSet.id };
         });
+      },
+
+      setActiveChangeSet(id) {
+        set((state) => ({
+          activeChangeSetId: id && state.changeSets[id] ? id : null,
+        }));
       },
 
       clearActiveChangeSet() {

@@ -127,6 +127,12 @@ describe("repository store change set persistence", () => {
     expect(store.getState().getActiveChangeSet()?.repositoryId).toBe(repoB.id);
     store.getState().storeChangeSet(setA);
     expect(store.getState().getActiveChangeSet()?.repositoryId).toBe(repoA.id);
+    store.getState().setActiveChangeSet(setB.id);
+    expect(store.getState().getActiveChangeSet()?.id).toBe(setB.id);
+    store.getState().setActiveChangeSet(setA.id);
+    expect(store.getState().getActiveChangeSet()?.id).toBe(setA.id);
+    store.getState().setActiveChangeSet("missing-change-set");
+    expect(store.getState().getActiveChangeSet()).toBeNull();
     expect(store.getState().changeSets[setB.id]).toEqual(setB);
   });
 });

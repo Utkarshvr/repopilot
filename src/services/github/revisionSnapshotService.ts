@@ -58,12 +58,16 @@ export async function buildRepositoryGraphSnapshot(
 ): Promise<RepositoryGraphSnapshot> {
   const normalizedSha = commitSha.toLowerCase();
   if (!/^[0-9a-f]{40,64}$/.test(normalizedSha)) throw new Error("A full immutable commit SHA is required to analyze a revision.");
+  const createSnapshot = () => runAnalysisPipeline(parsed, limits, onProgress, signal, { ref, commitSha: normalizedSha })
+    .then((result) => createRepositoryGraphSnapshot(result.analyzed, parsed, normalizedSha, ref));
+  // A shared request cannot safely inherit one caller's cancellation signal.
+  // Keep coalescing for non-cancellable callers; UI requests keep independent
+  // abort lifecycles so leaving or switching the comparison can stop its work.
+  if (signal) return createSnapshot();
   const key = revisionSnapshotId(`github:${parsed.owner}/${parsed.repo}`, normalizedSha);
   const existing = inFlightSnapshots.get(key);
   if (existing) return existing;
-  const pending = runAnalysisPipeline(parsed, limits, onProgress, signal, { ref, commitSha: normalizedSha })
-    .then((result) => createRepositoryGraphSnapshot(result.analyzed, parsed, normalizedSha, ref))
-    .finally(() => inFlightSnapshots.delete(key));
+  const pending = createSnapshot().finally(() => inFlightSnapshots.delete(key));
   inFlightSnapshots.set(key, pending);
   return pending;
 }

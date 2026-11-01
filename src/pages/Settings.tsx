@@ -3,7 +3,7 @@ import { Bell, GitBranch, Moon, Shield } from "lucide-react";
 const sections = [
   {
     title: "Appearance",
-    description: "Developer-centric dark theme is the default for Phase I.",
+    description: "RepoPilot uses a dark developer-focused interface.",
     icon: Moon,
     rows: [
       { label: "Theme", value: "Dark (zinc)" },
@@ -17,8 +17,8 @@ const sections = [
     icon: GitBranch,
     rows: [
       { label: "Public repositories", value: "Supported" },
-      { label: "Webhook sync", value: "Not configured" },
-      { label: "Private repos", value: "Requires authentication" },
+      { label: "Webhook sync", value: "Not available" },
+      { label: "Private repos", value: "Not supported" },
     ],
   },
   {
@@ -27,13 +27,13 @@ const sections = [
     icon: Shield,
     rows: [
       { label: "Dependency source", value: "GitHub source analysis" },
-      { label: "Impact model", value: "Reverse dependency traversal" },
-      { label: "AI explanations", value: "Not enabled · Phase II" },
+      { label: "Impact model", value: "Revision-aware dependency traversal" },
+      { label: "Explanations", value: "Dependency paths and structural factors" },
     ],
   },
   {
     title: "Notifications",
-    description: "Local UI placeholders only.",
+    description: "Notifications are not configured in this release.",
     icon: Bell,
     rows: [
       { label: "Impact alerts", value: "Not configured" },
@@ -51,8 +51,7 @@ export default function Settings() {
           <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         </div>
         <p className="mt-2 text-sm text-zinc-500">
-          Workspace preferences for RepoPilot. Values below are UI scaffolding —
-          no backend persistence yet.
+          Read-only product capabilities for this release. Preferences and notification settings are not configurable.
         </p>
       </section>
 

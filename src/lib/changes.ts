@@ -10,6 +10,8 @@ export function validateGitHubRevision(value: string): string | null {
   if (!ref) return "Enter a branch name or commit SHA.";
   if (ref === "@") return "Enter a valid branch name or commit SHA.";
   if (ref.length > 255) return "Revision references must be 255 characters or fewer.";
+  // Git refs reject control characters; ESLint flags this intentionally broad validation pattern.
+  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u0020\u007f]/.test(ref)) return "Revision references cannot contain whitespace or control characters.";
   if (ref.startsWith("/") || ref.endsWith("/") || ref.includes("//") || ref.includes("..") || ref.includes("@{")) {
     return "Enter a valid branch name or commit SHA.";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, GitCompareArrows, ListChecks, Loader2, Search, Trash2 } from "lucide-react";
 import { useRepositoryStore } from "@/store/repositoryStore";
@@ -8,11 +8,26 @@ import { summarizeChangeSet, type ChangeSet, type ChangedFile } from "@/types/ch
 import type { SourceFile } from "@/types";
 import { cn } from "@/lib/utils";
 import { buildRepositoryGraphSnapshot } from "@/services/github/revisionSnapshotService";
+import type { AnalyzedRepository } from "@/types/analysis";
 
 type ChangeSource = "manual" | "github-comparison";
 
 export default function ChangeAnalysis() {
   const analyzed = useRepositoryStore((state) => state.getActiveAnalyzed());
+  if (!analyzed) {
+    return (
+      <section className="mx-auto max-w-3xl rounded-xl border border-white/[0.08] bg-[#101014] p-8 text-center">
+        <GitCompareArrows className="mx-auto text-zinc-500" size={24} />
+        <h1 className="mt-3 text-lg font-semibold">Change Analysis</h1>
+        <p className="mt-2 text-sm text-zinc-500">Analyze a public GitHub repository before selecting or comparing changed files.</p>
+        <Link to="/repositories" className="mt-5 inline-flex rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400">Go to repositories</Link>
+      </section>
+    );
+  }
+  return <ChangeAnalysisWorkspace key={`${analyzed.id}:${analyzed.analyzedAt}:${analyzed.branch}`} analyzed={analyzed} />;
+}
+
+function ChangeAnalysisWorkspace({ analyzed }: { analyzed: AnalyzedRepository }) {
   const storeChangeSet = useRepositoryStore((state) => state.storeChangeSet);
   const storeRevisionSnapshot = useRepositoryStore((state) => state.storeRevisionSnapshot);
   const getRevisionSnapshot = useRepositoryStore((state) => state.getRevisionSnapshot);
@@ -25,36 +40,24 @@ export default function ChangeAnalysis() {
   const [comparison, setComparison] = useState<ChangeSet | null>(null);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isComparing, setIsComparing] = useState(false);
+  const comparisonRun = useRef(0);
+  const comparisonController = useRef<AbortController | null>(null);
   const [snapshotProgress, setSnapshotProgress] = useState<Record<"base" | "head", { status: "idle" | "building" | "reused" | "ready" | "failed"; message: string }>>({
     base: { status: "idle", message: "Not requested" },
     head: { status: "idle", message: "Not requested" },
   });
 
-  useEffect(() => {
-    setManualSelection(new Set());
-    setComparison(null);
-    setComparisonError(null);
-    setBaseRef(analyzed?.branch ?? "");
-    setHeadRef("");
-    setSnapshotProgress({ base: { status: "idle", message: "Not requested" }, head: { status: "idle", message: "Not requested" } });
-  }, [analyzed?.id, analyzed?.analyzedAt, analyzed?.branch]);
+  useEffect(() => () => {
+    comparisonController.current?.abort();
+    comparisonController.current = null;
+    comparisonRun.current += 1;
+  }, []);
 
   const filteredFiles = useMemo(() => {
-    const files = analyzed?.graph.files ?? [];
+    const files = analyzed.graph.files;
     const needle = query.trim().toLowerCase();
     return needle ? files.filter((file) => file.path.toLowerCase().includes(needle)) : files;
-  }, [analyzed?.graph.files, query]);
-
-  if (!analyzed) {
-    return (
-      <section className="mx-auto max-w-3xl rounded-xl border border-white/[0.08] bg-[#101014] p-8 text-center">
-        <GitCompareArrows className="mx-auto text-zinc-500" size={24} />
-        <h1 className="mt-3 text-lg font-semibold">Change Analysis</h1>
-        <p className="mt-2 text-sm text-zinc-500">Analyze a public GitHub repository before selecting or comparing changed files.</p>
-        <Link to="/repositories" className="mt-5 inline-flex rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400">Go to repositories</Link>
-      </section>
-    );
-  }
+  }, [analyzed.graph.files, query]);
 
   const selectedCompareCount = comparison?.files.filter((file) => file.selectedForImpact).length ?? 0;
   const toggleCompareFile = (path: string, previousPath: string | null) => {
@@ -80,13 +83,19 @@ export default function ChangeAnalysis() {
       return;
     }
 
+    const controller = new AbortController();
+    comparisonController.current = controller;
+    const runId = ++comparisonRun.current;
+    const isCurrentRun = () => comparisonRun.current === runId && !controller.signal.aborted;
     setIsComparing(true);
     try {
       const repository = parseGitHubUrl(analyzed.metadata.htmlUrl);
-      const result = await compareRepositoryCommits(repository.owner, repository.repo, baseRef, headRef);
+      const result = await compareRepositoryCommits(repository.owner, repository.repo, baseRef, headRef, controller.signal);
+      if (!isCurrentRun()) return;
       const nextChangeSet = { ...createGitHubChangeSet(analyzed, baseRef.trim(), headRef.trim(), result), baseSnapshotReused: null, headSnapshotReused: null, baseSnapshotError: null, headSnapshotError: null };
       setComparison(nextChangeSet);
       const buildSnapshot = async (side: "base" | "head", sha: string | null, ref: string) => {
+        if (!isCurrentRun()) return;
         if (!sha) {
           const message = "GitHub did not return the resolved commit SHA.";
           setComparison((current) => current ? { ...current, [side === "base" ? "baseSnapshotError" : "headSnapshotError"]: message } : current);
@@ -103,14 +112,17 @@ export default function ChangeAnalysis() {
         setSnapshotProgress((current) => ({ ...current, [side]: { status: "building", message: "Analyzing revision…" } }));
         try {
           const snapshot = await buildRepositoryGraphSnapshot(repository, sha, ref, (progress) => {
+            if (!isCurrentRun()) return;
             setSnapshotProgress((current) => current[side].status === "building"
               ? { ...current, [side]: { status: "building", message: progress.message } }
               : current);
-          });
+          }, controller.signal);
+          if (!isCurrentRun()) return;
           storeRevisionSnapshot(snapshot);
           setComparison((current) => current ? { ...current, [side === "base" ? "baseSnapshotReused" : "headSnapshotReused"]: false, [side === "base" ? "baseSnapshotError" : "headSnapshotError"]: null } : current);
           setSnapshotProgress((current) => ({ ...current, [side]: { status: "ready", message: `${snapshot.stats.filesAnalyzed} files analyzed${snapshot.complete ? " · complete" : " · partial"}` } }));
         } catch (error) {
+          if (!isCurrentRun()) return;
           const message = error instanceof Error ? error.message : "Revision analysis failed.";
           setComparison((current) => current ? { ...current, [side === "base" ? "baseSnapshotReused" : "headSnapshotReused"]: null, [side === "base" ? "baseSnapshotError" : "headSnapshotError"]: message } : current);
           setSnapshotProgress((current) => ({ ...current, [side]: { status: "failed", message } }));
@@ -119,10 +131,14 @@ export default function ChangeAnalysis() {
       await buildSnapshot("base", result.baseSha, baseRef.trim());
       await buildSnapshot("head", result.headSha, headRef.trim());
     } catch (error) {
+      if (!isCurrentRun()) return;
       setComparison(null);
       setComparisonError(error instanceof GitHubApiError ? error.message : error instanceof Error ? error.message : "GitHub comparison failed. Please try again.");
     } finally {
-      setIsComparing(false);
+      if (comparisonRun.current === runId) {
+        comparisonController.current = null;
+        setIsComparing(false);
+      }
     }
   };
 

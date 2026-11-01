@@ -12,12 +12,14 @@ import { cn } from "@/lib/utils";
 type ScopeFilter = "all" | "direct" | "transitive";
 type RiskFilter = "all" | ImpactRiskLevel;
 
-export function ChangeImpactReportView({ analyzed, report, changeSet, baseSnapshot, headSnapshot, onClearChangeSet }: {
+export function ChangeImpactReportView({ analyzed, report, changeSet, availableChangeSets, baseSnapshot, headSnapshot, onSelectChangeSet, onClearChangeSet }: {
   analyzed: AnalyzedRepository;
   report: ImpactReport;
   changeSet: ChangeSet;
+  availableChangeSets: ChangeSet[];
   baseSnapshot: RepositoryGraphSnapshot | null;
   headSnapshot: RepositoryGraphSnapshot | null;
+  onSelectChangeSet: (id: string) => void;
   onClearChangeSet: () => void;
 }) {
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
@@ -28,10 +30,7 @@ export function ChangeImpactReportView({ analyzed, report, changeSet, baseSnapsh
   const impactGraph = useMemo(() => mergeImpactGraphs(baseSnapshot, headSnapshot, analyzed.graph), [baseSnapshot, headSnapshot, analyzed.graph]);
 
   useEffect(() => {
-    setSelectedPath(null);
-    setScopeFilter("all");
-    setRiskFilter("all");
-    setChangedFilter("all");
+    // This setter synchronizes the shared graph-selection store with the newly keyed report view.
     setSelectedFileId(null);
   }, [report.changeSetId, setSelectedFileId]);
 
@@ -58,7 +57,14 @@ export function ChangeImpactReportView({ analyzed, report, changeSet, baseSnapsh
           <div className="flex items-center gap-2"><h1 className="text-2xl font-semibold tracking-tight">Change Impact Intelligence</h1><span className={`rounded border px-2 py-0.5 text-[10px] font-semibold uppercase ${riskClass}`}>{report.risk.level} risk · {report.risk.score}</span></div>
           <p className="mt-2 text-sm text-zinc-500">Structural impact assessment for <span className="text-zinc-300">{report.repositoryFullName}</span>. Risk is a graph-based heuristic, not a probability of runtime failure.</p>
         </div>
-        <button type="button" onClick={onClearChangeSet} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200">Return to single-file analysis</button>
+        <div className="flex flex-wrap items-center gap-2">
+          {availableChangeSets.length > 1 && <label className="flex items-center gap-2 text-[10px] text-zinc-500">Saved change set
+            <select aria-label="Switch saved change set" value={changeSet.id} onChange={(event) => onSelectChangeSet(event.target.value)} className="max-w-64 rounded-lg border border-white/10 bg-[#15151b] px-2.5 py-2 text-xs text-zinc-300">
+              {availableChangeSets.map((item) => <option key={item.id} value={item.id}>{item.source === "manual" ? "Manual" : `${item.baseRevision ?? "Base"} → ${item.headRevision ?? "Head"}`} · {item.files.filter((file) => file.selectedForImpact).length} selected</option>)}
+            </select>
+          </label>}
+          <button type="button" onClick={onClearChangeSet} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200">Return to single-file analysis</button>
+        </div>
       </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
