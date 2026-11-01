@@ -1,64 +1,191 @@
 # RepoPilot
 
-RepoPilot analyzes public GitHub repositories and builds a JavaScript/TypeScript dependency graph from source imports. Use it to inspect module relationships, compare revisions, and review the likely dependency impact of selected changes.
+**Understand the impact before the change ships.**
 
-## Requirements
+RepoPilot is a Change Impact Intelligence platform that helps developers
+understand the potential consequences of code changes before they ship
+them.
 
-- Node.js 20.19+ or 22.12+
-- npm
-- Network access to GitHub’s public API and `raw.githubusercontent.com`
+Instead of stopping at a list of modified files, RepoPilot analyzes
+repository dependencies, traces files connected to a change, explains
+dependency paths, and provides a transparent structural risk assessment.
 
-RepoPilot does not require environment variables or a GitHub token. It only supports public repositories; API requests use GitHub’s anonymous rate limit. Analyses and revision snapshots are saved in the current browser’s local storage.
+## Why RepoPilot?
 
-## Run locally
+A small change in a large codebase can affect files far beyond the one
+being edited. Those relationships are not always obvious, especially in
+unfamiliar or growing projects.
 
-```sh
-npm ci
+Developers often rely on manual code reviews, tribal knowledge, and
+trial and error to work out what might be affected. RepoPilot makes
+those relationships visible.
+
+## Features
+
+-   **GitHub repository analysis** --- analyze a repository and inspect
+    its source structure.
+-   **Dependency graph** --- visualize relationships between files and
+    explore dependencies and dependents.
+-   **Change detection** --- select files manually or compare GitHub
+    commits to identify additions, modifications, removals, and renames.
+-   **Change impact analysis** --- identify directly and transitively
+    affected files from a set of changes.
+-   **Dependency-path explanations** --- inspect paths connecting
+    changed files to potentially affected files.
+-   **Structural risk assessment** --- get an explainable risk estimate
+    based on repository structure and change scope.
+-   **Revision-aware analysis** --- compare repository dependency
+    structures at different Git revisions.
+-   **Analysis transparency** --- surface incomplete analysis,
+    unsupported files, unresolved imports, and other limitations.
+
+> **Important:** RepoPilot's risk score is a structural estimate. It is
+> not a probability that a change will cause a runtime failure, and an
+> identified affected file is not proof that the file is broken.
+
+## How it works
+
+1.  **Connect a repository.** Add a GitHub repository for analysis.
+2.  **Analyze the codebase.** RepoPilot discovers files and extracts
+    supported dependency relationships.
+3.  **Explore the dependency graph.** Inspect how source files depend on
+    one another.
+4.  **Identify changes.** Select files manually or compare two Git
+    commits.
+5.  **Calculate the impact.** RepoPilot traverses reverse dependency
+    relationships to find direct and transitive dependents.
+6.  **Review the explanation.** Inspect affected files, dependency
+    paths, structural risk factors, and analysis limitations.
+
+## Technical overview
+
+RepoPilot is built around a repository-analysis pipeline and a
+graph-based impact engine.
+
+-   **Frontend:** React, Vite, TypeScript, Tailwind CSS, shadcn/ui
+-   **Graph visualization:** React Flow (`@xyflow/react`)
+-   **State management:** Zustand
+-   **Data fetching:** TanStack Query
+-   **Code analysis:** TypeScript Compiler API for AST-based JavaScript
+    and TypeScript import extraction
+-   **Repository integration:** GitHub REST API
+
+### Dependency analysis
+
+RepoPilot uses AST-based parsing to extract supported relationships such
+as static imports, named and star re-exports, dynamic imports, CommonJS
+`require`, and type-only imports.
+
+It resolves supported relative paths and configured
+TypeScript/JavaScript path aliases. External package dependencies and
+unresolved imports are tracked separately from resolved internal file
+relationships.
+
+### Impact analysis
+
+The dependency graph represents importer-to-dependency relationships. To
+calculate change impact, RepoPilot traverses the graph in reverse to
+identify files that depend directly or transitively on changed files.
+
+Where revision-aware analysis is available, the engine uses repository
+snapshots for the relevant base and head commits instead of assuming
+that the dependency graph remained unchanged.
+
+### Analysis limitations
+
+Results depend on the files and dependency patterns RepoPilot can
+analyze. Dynamic runtime behavior, reflection, generated code,
+unsupported languages, and relationships not represented by supported
+import patterns may not be captured. Incomplete repository scans and
+unresolved imports are surfaced as limitations.
+
+## Getting started
+
+### Prerequisites
+
+-   Node.js (use a current LTS release)
+-   npm
+
+### Install dependencies
+
+``` bash
+git clone <YOUR_REPOSITORY_URL>
+cd repopilot
+npm install
+```
+
+### Configure environment
+
+Check the project's environment example file, if present, and provide
+the required values in a local `.env` file.
+
+GitHub App credentials, if GitHub App integration is enabled, must be
+configured only in the server-side environment. Never expose an App
+private key or client secret through frontend variables such as
+`VITE_*`, commit secrets to Git, or store them in browser storage.
+
+### Run locally
+
+``` bash
 npm run dev
 ```
 
-Open the local URL printed by Vite. To run checks and create a production build:
+### Build for production
 
-```sh
-npm test
+``` bash
 npm run build
-npm run preview
 ```
 
-`npm run build` runs the TypeScript project checks before producing the static site in `dist/`.
+### Run tests
 
-## Deploy to Netlify
+``` bash
+npm test
+```
 
-The repository includes `netlify.toml` with the build command, Node version, publish directory, and single-page-app route fallback.
+If a script differs in your checkout, use the scripts declared in
+`package.json`.
 
-1. Push this repository to GitHub.
-2. In Netlify, choose **Add new site → Import an existing project** and select the repository.
-3. Keep the build settings from `netlify.toml` (`npm run build`, publish `dist`).
-4. Leave environment variables empty; RepoPilot has no required secrets.
-5. Deploy. Netlify serves the static client and routes page refreshes back through `index.html`.
+## Security
 
-The browser calls GitHub directly, so the deployed site needs outbound access to GitHub’s public API and raw content host. Do not add a personal access token to client-side environment variables.
+-   Repository analysis should not execute repository code.
+-   GitHub access should use the minimum permissions required.
+-   For GitHub App access, use read-only repository metadata and
+    contents permissions unless the product explicitly requires
+    otherwise.
+-   Keep private keys, client secrets, and installation tokens out of
+    the browser bundle and source control.
+-   Configure secrets through the backend or deployment platform's
+    server-side environment settings.
 
-## Recommended demo workflow
+## Project status
 
-Use the public [`pmndrs/zustand`](https://github.com/pmndrs/zustand) repository. The following immutable revisions were validated in RepoPilot and keep the comparison reproducible:
+RepoPilot was developed as a hackathon project. Core work focuses on
+repository analysis, dependency visualization, change detection,
+revision-aware impact calculation, and explainable structural risk.
 
-- Base: `5408e012ccd5785b7a0e564b0fbdc8b555ecdb47`
-- Head: `382d29c485e67018c06e75ec7235130d0968522c`
+Some integrations may require deployment-specific configuration before
+they are available in a live environment. Check the current
+implementation and deployment configuration before relying on them.
 
-1. Open **Repositories**, connect `pmndrs/zustand`, and analyze its default branch.
-2. Open **Dependency Graph**, search for `src/vanilla.ts`, and select it to show its direct dependencies and dependents.
-3. Open **Change Analysis → GitHub comparison**. Paste the base and head SHAs above and compare them.
-4. Select a changed source file that is eligible for impact analysis, then continue after both revision graphs finish building.
-5. In **Impact Analysis**, review the affected-file counts, structural risk factors, completeness limitations, and base/head revisions.
-6. Select an affected file to highlight its dependency path and read the explanation beside the list.
+## Roadmap
 
-RepoPilot reports real GitHub and graph results. The structural risk score is a deterministic heuristic, not a probability of runtime failure. Partial graphs and unresolved imports are shown as analysis limitations.
+Potential future directions include broader language and framework
+support, more advanced dependency resolution, CI/CD and pull-request
+integrations, team workflows, and additional impact signals beyond
+static dependency relationships.
 
-## Analysis boundaries
+## Contributing
 
-- Only public repositories are supported; private repositories require an authenticated service that this release does not provide.
-- Source graph extraction covers JavaScript and TypeScript extensions. Safety limits and exclusions are reported per file.
-- GitHub compare responses can omit patches and are capped at 300 changed files.
-- The TypeScript parser is loaded on demand when repository analysis starts; its production chunk is large, but it is excluded from the initial application bundle.
-- Repository data is local to the browser profile. Clearing site storage removes saved analyses and snapshots.
+Contributions, bug reports, and suggestions are welcome.
+
+1.  Fork the repository.
+2.  Create a feature branch.
+3.  Make focused changes and add or update tests.
+4.  Run the test suite and production build.
+5.  Open a pull request describing the change and its impact.
+
+## License
+
+No license has been specified yet. Until a license is added to this
+repository, do not assume that the code is available for unrestricted
+reuse.
